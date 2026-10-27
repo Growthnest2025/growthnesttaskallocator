@@ -351,12 +351,22 @@ const app = {
   },
 
   logout() {
-    this.currentUser = null;
-    this.token = null;
-    localStorage.removeItem('gn_token');
-    localStorage.removeItem('gn_user');
-    this.renderNav();
-    this.showHome();
+    this.showDialog({
+      type: 'warning',
+      title: 'Sign Out?',
+      message: 'Are you sure you want to sign out from the GrowthNest Task Portal?',
+      confirmText: 'Sign Out',
+      cancelText: 'Cancel',
+      onConfirm: () => {
+        this.currentUser = null;
+        this.token = null;
+        localStorage.removeItem('gn_token');
+        localStorage.removeItem('gn_user');
+        this.renderNav();
+        this.showToast('You have been signed out.', 'info', 'Signed Out');
+        this.showHome();
+      }
+    });
   },
 
   async loadPortal() {
@@ -487,7 +497,18 @@ const app = {
     const task = this.roadmap.find(t => t.id === taskId);
     if (!task) return;
     if (task.state === 'LOCKED') {
-      alert(`Task ${task.sequence_order} is locked! Complete and obtain mentor approval for Task ${task.sequence_order - 1} first.`);
+      const prevTask = this.roadmap.find(t => t.sequence_order === task.sequence_order - 1);
+      this.showDialog({
+        type: 'lock',
+        title: `🔒 Task ${task.sequence_order} is Locked`,
+        message: `Assignments unlock strictly in sequence! Complete and obtain mentor approval for <strong>Task ${task.sequence_order - 1}${prevTask ? ': ' + this.escape(prevTask.title) : ''}</strong> first to unlock this milestone.`,
+        confirmText: 'Go to Active Task',
+        cancelText: 'Close',
+        onConfirm: () => {
+          const active = this.roadmap.find(t => t.state === 'ACTIVE' || t.state === 'CHANGES_REQUESTED' || t.state === 'UNDER_REVIEW');
+          if (active) app.selectStudentTask(active.id);
+        }
+      });
       return;
     }
     this.selectedTaskId = taskId;
@@ -632,7 +653,7 @@ const app = {
     const notes = document.getElementById('taskNotesInput').value;
 
     if (!code.trim() && !this.currentOutputBase64) {
-      alert('Please paste your code or select an output screenshot before submitting.');
+      this.showToast('Please paste your code or attach an output screenshot before submitting.', 'warning', 'Assignment Incomplete');
       return;
     }
 
@@ -657,10 +678,15 @@ const app = {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Submission failed');
 
-      alert('✓ Task submitted successfully! Your GrowthNest mentor will review it.');
+      this.showDialog({
+        type: 'success',
+        title: '🎉 Assignment Submitted!',
+        message: 'Your code and screenshot have been delivered to the <strong>GrowthNest mentor review queue</strong>. Once evaluated and approved, the next curriculum milestone will automatically unlock.',
+        confirmText: 'View Dashboard'
+      });
       await this.loadStudentPortal();
     } catch (err) {
-      alert('Error: ' + err.message);
+      this.showToast(err.message, 'error', 'Submission Failed');
     }
   },
 
@@ -761,7 +787,7 @@ const app = {
       this.sidebarFilter = 'pending';
       await this.selectStudent(pendingStudent.id, true);
     } else {
-      alert('✓ All caught up! No submissions are currently waiting for review.');
+      this.showToast('All caught up! No submissions are currently waiting for mentor review.', 'info', 'Review Queue Clear');
     }
   },
 
@@ -1043,6 +1069,13 @@ const app = {
               Feedback / Remarks for ${this.escape(student.full_name)}:
             </label>
             <input type="text" id="feedback_${pending_submission.id}" class="form-input" placeholder="Enter mentor feedback..." value="Great work! Requirements satisfied. Approved by GrowthNest Mentor.">
+
+            <div class="feedback-chips-strip">
+              <span class="feedback-chip" onclick="app.insertFeedback(${pending_submission.id}, '✓ Excellent clean HTML5 semantic structure! All requirements satisfied.')">✓ Clean Semantics</span>
+              <span class="feedback-chip" onclick="app.insertFeedback(${pending_submission.id}, '✓ Well done! Requirements verified and approved.')">✓ Requirements Met</span>
+              <span class="feedback-chip" onclick="app.insertFeedback(${pending_submission.id}, '⚠️ Please check closing tags and verify all requirements.')">⚠️ Check Closing Tags</span>
+              <span class="feedback-chip" onclick="app.insertFeedback(${pending_submission.id}, '⚠️ Please format and indent your code properly.')">⚠️ Indent Code</span>
+            </div>
           </div>
 
           <div style="display:flex; justify-content:flex-end; gap:12px; flex-wrap:wrap;">
@@ -1182,10 +1215,15 @@ const app = {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Review failed');
 
-      alert(data.message || (action === 'APPROVE' ? 'Approved! Next task unlocked.' : 'Changes requested.'));
+      const isApproved = action === 'APPROVE';
+      this.showToast(
+        data.message || (isApproved ? '✓ Submission approved! Next task unlocked for student.' : '⚠️ Changes requested. Student notified.'),
+        isApproved ? 'success' : 'warning',
+        isApproved ? 'Milestone Approved' : 'Feedback Dispatched'
+      );
       await this.loadAdminPortal();
     } catch (err) {
-      alert('Error: ' + err.message);
+      this.showToast(err.message, 'error', 'Review Failed');
     }
   },
 
@@ -1237,11 +1275,16 @@ const app = {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Enrollment failed');
 
-      alert(`✓ Student ${full_name} enrolled successfully! Task 1 (HTML Semantic Resume) has been unlocked.`);
       this.closeModal('addStudentModal');
+      this.showDialog({
+        type: 'success',
+        title: '✓ Student Enrolled Successfully!',
+        message: `<strong>${this.escape(full_name)}</strong> (@${this.escape(username)}) has been enrolled in GrowthNest. <strong>Task 1: HTML Document Structure</strong> has been allocated!`,
+        confirmText: 'Done'
+      });
       await this.loadAdminPortal();
     } catch (err) {
-      alert('Error: ' + err.message);
+      this.showToast(err.message, 'error', 'Enrollment Failed');
     }
   },
 
@@ -1271,12 +1314,127 @@ const app = {
     const el = document.getElementById(elementId);
     if (el) {
       navigator.clipboard.writeText(el.value).then(() => {
-        alert('✓ Code copied to clipboard!');
+        this.showToast('Student source code copied to clipboard!', 'success', 'Copied');
       }).catch(() => {
         el.select();
         document.execCommand('copy');
-        alert('✓ Code copied to clipboard!');
+        this.showToast('Student source code copied to clipboard!', 'success', 'Copied');
       });
+    }
+  },
+
+  // --------------------------------------------------------------------------
+  // Modern Toast Notification System (replaces invasive alert popups)
+  // --------------------------------------------------------------------------
+  showToast(message, type = 'info', title = '') {
+    const container = document.getElementById('toastContainer');
+    if (!container) return;
+
+    const icons = {
+      success: '✓',
+      error: '✕',
+      warning: '⚠️',
+      info: 'ℹ️'
+    };
+
+    const defaultTitles = {
+      success: 'Success',
+      error: 'Error',
+      warning: 'Attention',
+      info: 'GrowthNest Notice'
+    };
+
+    const toast = document.createElement('div');
+    toast.className = `toast-card toast-${type}`;
+    toast.innerHTML = `
+      <div class="toast-icon-badge">${icons[type] || 'ℹ️'}</div>
+      <div class="toast-body">
+        <div class="toast-title">${this.escape(title || defaultTitles[type] || 'Notification')}</div>
+        <div class="toast-message">${this.escape(message)}</div>
+      </div>
+      <button class="toast-close-btn" onclick="this.parentElement.remove()" title="Close notification">&times;</button>
+      <div class="toast-progress-bar"></div>
+    `;
+
+    container.appendChild(toast);
+
+    setTimeout(() => {
+      toast.classList.add('toast-fade-out');
+      setTimeout(() => { if (toast.parentElement) toast.remove(); }, 300);
+    }, 3800);
+  },
+
+  // --------------------------------------------------------------------------
+  // Modern Interactive Dialog Box System (replaces window.alert & window.confirm)
+  // --------------------------------------------------------------------------
+  dialogCallback: null,
+
+  showDialog({ title, message, type = 'info', confirmText = 'OK', cancelText = null, onConfirm = null }) {
+    const dialogBackdrop = document.getElementById('globalAppDialog');
+    const titleEl = document.getElementById('dialogTitle');
+    const msgEl = document.getElementById('dialogMessage');
+    const iconWrap = document.getElementById('dialogIconWrap');
+    const iconText = document.getElementById('dialogIconText');
+    const confirmBtn = document.getElementById('dialogConfirmBtn');
+    const cancelBtn = document.getElementById('dialogCancelBtn');
+
+    if (!dialogBackdrop) return;
+
+    const iconMap = {
+      success: { icon: '✓', class: 'dialog-icon-success', btnClass: 'btn-primary' },
+      lock: { icon: '🔒', class: 'dialog-icon-lock', btnClass: 'btn-gold' },
+      warning: { icon: '⚠️', class: 'dialog-icon-warning', btnClass: 'btn-gold' },
+      error: { icon: '✕', class: 'dialog-icon-danger', btnClass: 'btn-danger' },
+      info: { icon: '💡', class: 'dialog-icon-info', btnClass: 'btn-primary' }
+    };
+
+    const cfg = iconMap[type] || iconMap.info;
+    iconWrap.className = `dialog-icon-circle ${cfg.class}`;
+    iconText.textContent = cfg.icon;
+
+    titleEl.textContent = title || 'Notification';
+    msgEl.innerHTML = message || '';
+
+    confirmBtn.textContent = confirmText;
+    confirmBtn.className = `btn ${cfg.btnClass}`;
+
+    if (cancelText) {
+      cancelBtn.style.display = 'inline-flex';
+      cancelBtn.textContent = cancelText;
+    } else {
+      cancelBtn.style.display = 'none';
+    }
+
+    this.dialogCallback = onConfirm;
+    dialogBackdrop.style.display = 'flex';
+  },
+
+  closeDialog() {
+    const dialogBackdrop = document.getElementById('globalAppDialog');
+    if (dialogBackdrop) dialogBackdrop.style.display = 'none';
+    this.dialogCallback = null;
+  },
+
+  confirmDialog() {
+    const cb = this.dialogCallback;
+    this.closeDialog();
+    if (typeof cb === 'function') {
+      cb();
+    }
+  },
+
+  closeDialogOnBackdrop(e) {
+    if (e.target.id === 'globalAppDialog') {
+      this.closeDialog();
+    }
+  },
+
+  insertFeedback(subId, text) {
+    const el = document.getElementById('feedback_' + subId);
+    if (el) {
+      el.value = text;
+      el.focus();
+      this.showToast('Preset feedback template inserted.', 'info', 'Feedback Template');
     }
   },
 
@@ -1301,4 +1459,13 @@ const app = {
 // Initialize App on DOM Load
 window.addEventListener('DOMContentLoaded', () => {
   app.init();
+});
+
+// Close dialogs and modals on Escape key
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    app.closeDialog();
+    app.closeModal('addStudentModal');
+    app.closeModal('imagePreviewModal');
+  }
 });

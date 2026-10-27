@@ -29,15 +29,38 @@
     </div>
   </main>
 
-  <!-- Add Student Modal (for Admin) -->
-  <div id="addStudentModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:1000; align-items:center; justify-content:center; padding:16px;">
-    <div class="modal-card">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
-        <h3 style="font-size:18px; color:var(--dark-navy); display:flex; align-items:center; gap:8px;">
-          <span style="color:var(--emerald);">➕</span> Enroll New Student
-        </h3>
-        <button style="background:none; border:none; font-size:22px; cursor:pointer; color:var(--text-muted);" onclick="app.closeModal('addStudentModal')">&times;</button>
+  <!-- Universal Custom Dialog Box (replaces native window.alert & window.confirm) -->
+  <div id="globalAppDialog" class="modal-backdrop" style="display:none;" onclick="app.closeDialogOnBackdrop(event)">
+    <div class="dialog-box" onclick="event.stopPropagation()">
+      <div id="dialogIconWrap" class="dialog-icon-circle dialog-icon-success">
+        <span id="dialogIconText">✓</span>
       </div>
+      <h3 id="dialogTitle" class="dialog-title">Dialog Title</h3>
+      <div id="dialogMessage" class="dialog-message">Dialog message content...</div>
+      <div id="dialogActions" class="dialog-actions">
+        <button id="dialogCancelBtn" class="btn btn-outline" onclick="app.closeDialog()">Cancel</button>
+        <button id="dialogConfirmBtn" class="btn btn-primary" onclick="app.confirmDialog()">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container" aria-live="polite"></div>
+
+  <!-- Add Student Modal (for Admin) -->
+  <div id="addStudentModal" class="modal-backdrop" style="display:none;" onclick="if(event.target===this)app.closeModal('addStudentModal')">
+    <div class="modal-card">
+      <div class="modal-header-strip">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div class="modal-header-icon">🎓</div>
+          <div>
+            <h3 style="font-size:18px; font-weight:800; color:var(--dark-navy);">Enroll New Student</h3>
+            <p style="font-size:12px; color:var(--text-muted); margin-top:1px;">Allocates Task 1 &bull; Begins daily training track</p>
+          </div>
+        </div>
+        <button class="modal-close-btn" onclick="app.closeModal('addStudentModal')">&times;</button>
+      </div>
+
       <form onsubmit="app.handleAdminEnroll(event)">
         <div class="form-group">
           <label>Full Name *</label>
@@ -48,26 +71,33 @@
           <input type="text" id="addUsername" class="form-input" required placeholder="e.g. ramesh25">
         </div>
         <div class="form-group">
-          <label>Password *</label>
+          <label>Initial Password *</label>
           <input type="password" id="addPassword" class="form-input" required placeholder="Create initial password">
         </div>
         <div class="form-group">
           <label>Real Joining Date * (Time elapsed starts from this date)</label>
           <input type="date" id="addJoiningDate" class="form-input" required>
         </div>
-        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:22px;">
           <button type="button" class="btn btn-outline" onclick="app.closeModal('addStudentModal')">Cancel</button>
-          <button type="submit" class="btn btn-primary">Enroll & Allocate Task 1</button>
+          <button type="submit" class="btn btn-primary">➕ Enroll & Allocate Task 1</button>
         </div>
       </form>
     </div>
   </div>
 
   <!-- Screenshot Zoom Modal -->
-  <div id="imagePreviewModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.85); z-index:1100; align-items:center; justify-content:center; padding:20px;" onclick="app.closeModal('imagePreviewModal')">
-    <div style="max-width:900px; max-height:90vh; position:relative;" onclick="event.stopPropagation()">
-      <button style="position:absolute; top:-36px; right:0; background:none; border:none; color:white; font-size:28px; cursor:pointer;" onclick="app.closeModal('imagePreviewModal')">&times;</button>
-      <img id="previewModalImg" src="" alt="Submission Screenshot" style="max-width:100%; max-height:85vh; border-radius:10px; box-shadow:0 12px 30px rgba(0,0,0,0.5);">
+  <div id="imagePreviewModal" class="modal-backdrop" style="display:none;" onclick="if(event.target===this)app.closeModal('imagePreviewModal')">
+    <div class="image-preview-dialog" onclick="event.stopPropagation()">
+      <div class="image-preview-header">
+        <div style="display:flex; align-items:center; gap:8px; color:white; font-size:13.5px; font-weight:700;">
+          <span>📸</span> Submitted Output Screenshot
+        </div>
+        <button class="modal-close-btn modal-close-btn-white" onclick="app.closeModal('imagePreviewModal')">&times;</button>
+      </div>
+      <div class="image-preview-body">
+        <img id="previewModalImg" src="" alt="Submission Screenshot" class="image-preview-img">
+      </div>
     </div>
   </div>
 
