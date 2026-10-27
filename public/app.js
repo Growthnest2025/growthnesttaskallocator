@@ -345,6 +345,11 @@ const app = {
 
       this.renderNav();
       await this.loadPortal();
+      this.showToast(
+        `Welcome ${fullName}! Task 1 has been allocated.`,
+        'success',
+        'Registration Successful'
+      );
     } catch (err) {
       this.showStudentAuth(err.message);
     }
@@ -1275,14 +1280,33 @@ const app = {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Enrollment failed');
 
+      // Clear form inputs
+      const addNameEl = document.getElementById('addName');
+      const addUserEl = document.getElementById('addUsername');
+      const addPassEl = document.getElementById('addPassword');
+      if (addNameEl) addNameEl.value = '';
+      if (addUserEl) addUserEl.value = '';
+      if (addPassEl) addPassEl.value = '';
+
+      // Reset sidebar filter so the new student is immediately visible in the directory
+      this.sidebarFilter = 'all';
+      this.sidebarSearch = '';
+      if (data.student_id) {
+        this.selectedStudentId = Number(data.student_id);
+      }
+      this.adminMobileTab = 'workspace';
+
       this.closeModal('addStudentModal');
-      this.showDialog({
-        type: 'success',
-        title: '✓ Student Enrolled Successfully!',
-        message: `<strong>${this.escape(full_name)}</strong> (@${this.escape(username)}) has been enrolled in GrowthNest. <strong>Task 1: HTML Document Structure</strong> has been allocated!`,
-        confirmText: 'Done'
-      });
       await this.loadAdminPortal();
+      if (data.student_id) {
+        await this.selectStudent(Number(data.student_id));
+      }
+
+      this.showToast(
+        `✓ ${full_name} (@${username}) enrolled successfully & Task 1 assigned!`,
+        'success',
+        'Student Enrolled'
+      );
     } catch (err) {
       this.showToast(err.message, 'error', 'Enrollment Failed');
     }

@@ -121,10 +121,19 @@ function createMemoryDbFallback() {
           if (s.includes('FROM submissions s JOIN tasks t') && s.includes('s.student_id = ?')) {
             return submissions.filter(x => x.student_id === Number(params[0])).map(sub => {
               const task = tasks.find(t => t.id === sub.task_id) || {};
-              return { ...sub, sequence_order: task.sequence_order, task_title: task.title, module: task.module };
+              return {
+                ...sub,
+                sequence_order: task.sequence_order,
+                task_title: task.title,
+                module: task.module,
+                task_module: task.module,
+                task_desc: task.description,
+                task_inst: task.instructions,
+                requirements_json: task.requirements_json
+              };
             }).sort((a,b) => b.id - a.id);
           }
-          if (s.includes('WHERE u.role = \'student\'')) {
+          if (s.includes("role = 'student'") || s.includes('role = "student"')) {
             return users.filter(x => x.role === 'student').map(u => ({ ...u }));
           }
           if (s.includes('FROM submissions s JOIN tasks t') && s.includes('s.status = \'PENDING\'')) {
@@ -138,9 +147,15 @@ function createMemoryDbFallback() {
         },
         run(...params) {
           if (s.includes('INSERT INTO users')) {
-            const [username, password_hash, role, full_name, email, phone, joining_date, course_track] = params;
+            let username, password_hash, role, full_name, email, phone, joining_date, course_track;
+            if (params.length === 7) {
+              [username, password_hash, full_name, email, phone, joining_date, course_track] = params;
+              role = 'student';
+            } else {
+              [username, password_hash, role, full_name, email, phone, joining_date, course_track] = params;
+            }
             const newId = users.length > 0 ? Math.max(...users.map(u => u.id)) + 1 : 1;
-            users.push({ id: newId, username, password_hash, role, full_name, email, phone, joining_date, course_track });
+            users.push({ id: newId, username, password_hash, role: role || 'student', full_name, email, phone, joining_date, course_track });
             return { lastInsertRowid: newId, changes: 1 };
           }
           if (s.includes('INSERT INTO student_progress')) {
@@ -720,11 +735,12 @@ const requestHandler = async (req, res) => {
       try {
         const stmt = db.prepare(`
           INSERT INTO users (username, password_hash, role, full_name, email, phone, joining_date, course_track)
-          VALUES (?, ?, 'student', ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `);
         const result = stmt.run(
           username,
           passHash,
+          'student',
           full_name,
           email || '',
           phone || '',
