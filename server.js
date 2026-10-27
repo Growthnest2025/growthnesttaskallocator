@@ -769,7 +769,7 @@ const requestHandler = async (req, res) => {
     // ------------------------------------------------------------------------
     // API: Admin Review Submission (Approve / Request Changes)
     // ------------------------------------------------------------------------
-    if (pathname === '/api/admin/review' && req.method === 'POST') {
+    if ((pathname === '/api/admin/review' || pathname === '/api/admin/review-submission') && req.method === 'POST') {
       const { submission_id, action, feedback, admin_id } = await parseJsonBody(req);
 
       if (!submission_id || !['APPROVE', 'REJECT'].includes(action)) {
