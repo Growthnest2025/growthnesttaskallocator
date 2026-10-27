@@ -524,7 +524,7 @@ const requestHandler = async (req, res) => {
     // ------------------------------------------------------------------------
     // API: Submit Task
     // ------------------------------------------------------------------------
-    if (pathname === '/api/submissions' && req.method === 'POST') {
+    if ((pathname === '/api/submissions' || pathname === '/api/student/submit-task') && req.method === 'POST') {
       const body = await parseJsonBody(req);
       const {
         student_id,
