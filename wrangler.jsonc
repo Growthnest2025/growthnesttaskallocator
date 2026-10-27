@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "growthnest-task-portal",
+  "main": "worker.js",
+  "compatibility_date": "2026-10-21",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "growthnest-db",
+      "database_id": "growthnest-db-id-placeholder"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "STORAGE",
+      "bucket_name": "growthnest-submissions"
+    }
+  ],
+  "vars": {
+    "PORTAL_NAME": "GrowthNest Tech Solutions Task Portal",
+    "JWT_SECRET": "growthnest-institute-super-secret-key-2026"
+  }
+}
