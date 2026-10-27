@@ -1,6 +1,6 @@
 /**
- * Vercel Serverless Function Handler
- * Routes all /api/* requests to the GrowthNest request handler with SQLite database support
+ * GrowthNest Tech Solutions - Vercel Serverless Function Root Handler
+ * Handles root /api and /api/ requests.
  */
 
 const requestHandler = require('../server.js');

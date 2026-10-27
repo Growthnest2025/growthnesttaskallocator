@@ -1,30 +1,23 @@
 {
   "name": "growthnest-task-portal",
   "version": "1.0.0",
-  "description": "GrowthNest Tech Solutions - Automated Student Task Allocation, Review & Tracking Portal with Cloudflare D1 & R2",
+  "description": "GrowthNest Tech Solutions - Automated Student Task Allocation, Review & Tracking Portal",
   "main": "server.js",
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "build": "node -e \"console.log('✓ Vercel build complete')\"",
-    "vercel:deploy": "vercel --prod",
     "seed": "node scripts/seed.js",
     "cf:dev": "wrangler dev",
-    "cf:deploy": "wrangler deploy",
-    "cf:d1-create": "wrangler d1 create growthnest-db",
-    "cf:d1-init": "wrangler d1 execute growthnest-db --file=schema.sql",
-    "cf:r2-create": "wrangler r2 bucket create growthnest-submissions"
+    "cf:deploy": "wrangler deploy"
   },
   "engines": {
-    "node": ">=22.0.0"
+    "node": "22.x"
   },
   "keywords": [
     "growthnest",
     "student-portal",
     "task-allocation",
-    "cloudflare-d1",
-    "cloudflare-r2",
     "lightweight"
   ],
   "author": "GrowthNest Tech Solutions",

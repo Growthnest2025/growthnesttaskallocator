@@ -8,7 +8,13 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { DatabaseSync } = require('node:sqlite');
+
+let DatabaseSync = null;
+try {
+  DatabaseSync = require('node:sqlite').DatabaseSync;
+} catch (e) {
+  console.warn('node:sqlite not natively available in this Node runtime:', e.message);
+}
 
 const PORT = process.env.PORT || 5000;
 const isVercel = Boolean(process.env.VERCEL || process.env.NOW_REGION);
@@ -17,30 +23,206 @@ const SCHEMA_FILE = path.join(__dirname, 'schema.sql');
 const UPLOADS_DIR = isVercel ? path.join('/tmp', 'uploads') : path.join(__dirname, 'uploads');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
-if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-
-// If on Vercel and /tmp/growthnest.db does not exist, copy existing database file to /tmp
-if (isVercel && !fs.existsSync(DB_FILE)) {
-  const localDb = path.join(__dirname, 'growthnest.db');
-  if (fs.existsSync(localDb)) {
-    try {
-      fs.copyFileSync(localDb, DB_FILE);
-    } catch (e) {
-      console.warn('Could not copy seed DB to /tmp, will initialize from schema.sql:', e.message);
-    }
-  }
+if (!fs.existsSync(UPLOADS_DIR)) {
+  try { fs.mkdirSync(UPLOADS_DIR, { recursive: true }); } catch (e) {}
 }
 
-// Initialize SQLite database
-const isNewDb = !fs.existsSync(DB_FILE);
-const db = new DatabaseSync(DB_FILE);
+// In-memory fallback if node:sqlite is not supported on this platform
+function createMemoryDbFallback() {
+  console.log('⚡ Initializing GrowthNest in-memory fallback store...');
+  const users = [
+    { id: 1, username: 'admin', password_hash: '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', role: 'admin', full_name: 'Lead Trainer / Admin', email: 'admin@growthnesttech.com', phone: '+91 9876543210', joining_date: '2026-01-01', course_track: 'Frontend Web Development (HTML/CSS/JS)' },
+    { id: 2, username: 'karthik', password_hash: '703b0a3d6ad75b649a28adde7d83c6251da457549263bc7ff45ec709b0a8448b', role: 'student', full_name: 'Karthik Raja', email: 'karthik@growthnest.com', phone: '+91 9876500001', joining_date: '2026-10-12', course_track: 'Frontend Web Development (HTML/CSS/JS)' },
+    { id: 3, username: 'ananya', password_hash: '703b0a3d6ad75b649a28adde7d83c6251da457549263bc7ff45ec709b0a8448b', role: 'student', full_name: 'Ananya S', email: 'ananya@growthnest.com', phone: '+91 9876500002', joining_date: '2026-10-24', course_track: 'Frontend Web Development (HTML/CSS/JS)' },
+    { id: 4, username: 'Berlin2005', password_hash: 'dad114b6ed7342bac65c79575f6c7ff761ec26b52c1f5f7a9110532973d05df2', role: 'student', full_name: 'Berlin', email: 'berlin@growthnest.com', phone: '+91 9876500003', joining_date: '2026-10-27', course_track: 'Frontend Web Development (HTML/CSS/JS)' }
+  ];
 
-if (isNewDb || true) {
+  const tasks = [];
   if (fs.existsSync(SCHEMA_FILE)) {
-    const schemaSql = fs.readFileSync(SCHEMA_FILE, 'utf8');
-    db.exec(schemaSql);
-    console.log('✓ SQLite Database initialized from schema.sql');
+    const rawSql = fs.readFileSync(SCHEMA_FILE, 'utf8');
+    const regex = /\((\d+),\s*(\d+),\s*'([^']+)',\s*'([^']+)',\s*'([^']+)',\s*(\d+),\s*\n?\s*'([^']+)',\s*\n?\s*'([^']+)',\s*\n?\s*'([^']+)'\)/g;
+    let match;
+    while ((match = regex.exec(rawSql)) !== null) {
+      tasks.push({
+        id: Number(match[1]),
+        sequence_order: Number(match[2]),
+        module: match[3],
+        title: match[4],
+        difficulty: match[5],
+        estimated_days: Number(match[6]),
+        description: match[7],
+        instructions: match[8],
+        requirements_json: match[9]
+      });
+    }
   }
+
+  const student_progress = [
+    { id: 1, student_id: 2, current_task_id: 1, status: 'APPROVED', unlocked_at: '2026-10-12', completed_at: '2026-10-13' },
+    { id: 2, student_id: 2, current_task_id: 2, status: 'IN_PROGRESS', unlocked_at: '2026-10-13', completed_at: null },
+    { id: 3, student_id: 3, current_task_id: 1, status: 'IN_PROGRESS', unlocked_at: '2026-10-24', completed_at: null },
+    { id: 4, student_id: 4, current_task_id: 1, status: 'IN_PROGRESS', unlocked_at: '2026-10-27', completed_at: null }
+  ];
+
+  const submissions = [];
+
+  return {
+    exec(sql) {},
+    prepare(sql) {
+      const s = sql.trim().replace(/\s+/g, ' ');
+      return {
+        get(...params) {
+          if (s.includes('FROM users WHERE username = ? AND')) {
+            const [u, h, p] = params;
+            return users.find(x => x.username === u && (x.password_hash === h || x.password_hash === p));
+          }
+          if (s.includes('FROM users WHERE username = ?')) {
+            return users.find(x => x.username === params[0]);
+          }
+          if (s.includes('FROM users WHERE id = ?')) {
+            return users.find(x => x.id === Number(params[0]));
+          }
+          if (s.includes('COUNT(*) as count FROM users WHERE role =')) {
+            return { count: users.filter(x => x.role === 'student').length };
+          }
+          if (s.includes('COUNT(*) as count FROM submissions WHERE status = \'PENDING\'')) {
+            return { count: submissions.filter(x => x.status === 'PENDING').length };
+          }
+          if (s.includes('COUNT(*) as count FROM submissions WHERE status = \'APPROVED\'')) {
+            return { count: submissions.filter(x => x.status === 'APPROVED').length };
+          }
+          if (s.includes('COUNT(*) as count FROM submissions WHERE status = \'CHANGES_REQUESTED\'')) {
+            return { count: submissions.filter(x => x.status === 'CHANGES_REQUESTED').length };
+          }
+          if (s.includes('COUNT(*) as count FROM student_progress WHERE student_id = ? AND status = \'APPROVED\'')) {
+            return { count: student_progress.filter(x => x.student_id === Number(params[0]) && x.status === 'APPROVED').length };
+          }
+          if (s.includes('COUNT(*) as count FROM submissions WHERE student_id = ? AND status = \'PENDING\'')) {
+            return { count: submissions.filter(x => x.student_id === Number(params[0]) && x.status === 'PENDING').length };
+          }
+          if (s.includes('FROM submissions WHERE id = ?')) {
+            return submissions.find(x => x.id === Number(params[0]));
+          }
+          if (s.includes('FROM tasks WHERE id = ?')) {
+            return tasks.find(x => x.id === Number(params[0]));
+          }
+          return undefined;
+        },
+        all(...params) {
+          if (s.includes('FROM tasks ORDER BY sequence_order ASC')) {
+            return [...tasks].sort((a,b) => a.sequence_order - b.sequence_order);
+          }
+          if (s.includes('FROM student_progress WHERE student_id = ?')) {
+            return student_progress.filter(x => x.student_id === Number(params[0]));
+          }
+          if (s.includes('FROM submissions WHERE student_id = ? ORDER BY id DESC')) {
+            return submissions.filter(x => x.student_id === Number(params[0])).sort((a,b) => b.id - a.id);
+          }
+          if (s.includes('FROM submissions s JOIN tasks t') && s.includes('s.student_id = ?')) {
+            return submissions.filter(x => x.student_id === Number(params[0])).map(sub => {
+              const task = tasks.find(t => t.id === sub.task_id) || {};
+              return { ...sub, sequence_order: task.sequence_order, task_title: task.title, module: task.module };
+            }).sort((a,b) => b.id - a.id);
+          }
+          if (s.includes('WHERE u.role = \'student\'')) {
+            return users.filter(x => x.role === 'student').map(u => ({ ...u }));
+          }
+          if (s.includes('FROM submissions s JOIN tasks t') && s.includes('s.status = \'PENDING\'')) {
+            return submissions.filter(x => x.status === 'PENDING').map(sub => {
+              const task = tasks.find(t => t.id === sub.task_id) || {};
+              const user = users.find(u => u.id === sub.student_id) || {};
+              return { ...sub, task_title: task.title, sequence_order: task.sequence_order, module: task.module, student_name: user.full_name };
+            });
+          }
+          return [];
+        },
+        run(...params) {
+          if (s.includes('INSERT INTO users')) {
+            const [username, password_hash, role, full_name, email, phone, joining_date, course_track] = params;
+            const newId = users.length > 0 ? Math.max(...users.map(u => u.id)) + 1 : 1;
+            users.push({ id: newId, username, password_hash, role, full_name, email, phone, joining_date, course_track });
+            return { lastInsertRowid: newId, changes: 1 };
+          }
+          if (s.includes('INSERT INTO student_progress')) {
+            const [student_id, current_task_id, status] = params;
+            const existing = student_progress.find(x => x.student_id === Number(student_id) && x.current_task_id === Number(current_task_id));
+            if (existing) {
+              existing.status = status;
+              return { lastInsertRowid: existing.id, changes: 1 };
+            }
+            const newId = student_progress.length > 0 ? Math.max(...student_progress.map(p => p.id)) + 1 : 1;
+            student_progress.push({ id: newId, student_id: Number(student_id), current_task_id: Number(current_task_id), status: status || 'IN_PROGRESS' });
+            return { lastInsertRowid: newId, changes: 1 };
+          }
+          if (s.includes('INSERT INTO submissions')) {
+            const [student_id, task_id, code_html, code_css, code_js, sample_code_text, output_url, output_screenshot_key, student_notes] = params;
+            const newId = submissions.length > 0 ? Math.max(...submissions.map(x => x.id)) + 1 : 1;
+            submissions.push({
+              id: newId,
+              student_id: Number(student_id),
+              task_id: Number(task_id),
+              code_html, code_css, code_js, sample_code_text, output_url, output_screenshot_key, student_notes,
+              status: 'PENDING',
+              submitted_at: new Date().toISOString()
+            });
+            return { lastInsertRowid: newId, changes: 1 };
+          }
+          if (s.includes('UPDATE submissions SET status = ?')) {
+            const [status, feedback, reviewed_by, subId] = params;
+            const sub = submissions.find(x => x.id === Number(subId));
+            if (sub) {
+              sub.status = status;
+              sub.admin_feedback = feedback;
+              sub.reviewed_by = reviewed_by;
+              sub.reviewed_at = new Date().toISOString();
+            }
+            return { changes: 1 };
+          }
+          if (s.includes('UPDATE student_progress SET status = ?')) {
+            const [status, completed_at, student_id, task_id] = params.length === 4 ? params : [params[0], null, params[1], params[2]];
+            const prog = student_progress.find(x => x.student_id === Number(student_id) && x.current_task_id === Number(task_id));
+            if (prog) {
+              prog.status = status;
+              if (completed_at) prog.completed_at = completed_at;
+            }
+            return { changes: 1 };
+          }
+          return { lastInsertRowid: 1, changes: 1 };
+        }
+      };
+    }
+  };
+}
+
+let db = null;
+if (DatabaseSync) {
+  try {
+    if (isVercel && !fs.existsSync(DB_FILE)) {
+      const localDb = path.join(__dirname, 'growthnest.db');
+      if (fs.existsSync(localDb)) {
+        try { fs.copyFileSync(localDb, DB_FILE); } catch (e) {}
+      }
+    }
+
+    db = new DatabaseSync(DB_FILE);
+    if (fs.existsSync(SCHEMA_FILE)) {
+      const schemaSql = fs.readFileSync(SCHEMA_FILE, 'utf8');
+      db.exec(schemaSql);
+      console.log('✓ SQLite Database initialized from schema.sql');
+    }
+  } catch (err) {
+    console.warn('Could not initialize file SQLite DB, trying in-memory SQLite:', err.message);
+    try {
+      db = new DatabaseSync(':memory:');
+      if (fs.existsSync(SCHEMA_FILE)) {
+        db.exec(fs.readFileSync(SCHEMA_FILE, 'utf8'));
+      }
+    } catch (e2) {
+      db = createMemoryDbFallback();
+    }
+  }
+} else {
+  db = createMemoryDbFallback();
 }
 
 function sha256(str) {
@@ -98,9 +280,38 @@ const MIME_TYPES = {
   '.ico': 'image/x-icon'
 };
 
+function getRequestPathname(req) {
+  // Support Vercel dynamic catch-all route api/[...path].js
+  if (req.query && req.query.path) {
+    const sub = Array.isArray(req.query.path) ? req.query.path.join('/') : req.query.path;
+    return '/api/' + sub;
+  }
+
+  let raw = req.url || '/';
+  const forwarded = req.headers['x-forwarded-uri'] || req.headers['x-original-uri'];
+  const matched = req.headers['x-matched-path'];
+
+  if (forwarded && forwarded.startsWith('/api')) {
+    raw = forwarded;
+  } else if (matched && matched.startsWith('/api') && !matched.includes('[...path]') && !matched.endsWith('/index.js')) {
+    raw = matched;
+  }
+
+  try {
+    const parsed = new URL(raw, `http://${req.headers.host || 'localhost'}`);
+    let pathname = parsed.pathname;
+    if (pathname.length > 1 && pathname.endsWith('/')) {
+      pathname = pathname.slice(0, -1);
+    }
+    return pathname;
+  } catch {
+    return (raw || '/').split('?')[0];
+  }
+}
+
 const requestHandler = async (req, res) => {
-  const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
-  const pathname = parsedUrl.pathname;
+  const pathname = getRequestPathname(req);
+  const parsedUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
 
   // CORS Preflight
   if (req.method === 'OPTIONS') {
@@ -113,6 +324,20 @@ const requestHandler = async (req, res) => {
   }
 
   try {
+    // ------------------------------------------------------------------------
+    // API: Health & Status
+    // ------------------------------------------------------------------------
+    if (pathname === '/api/health' || pathname === '/api' || pathname === '/api/' || pathname === '/api/index.js') {
+      return sendJson(res, {
+        status: 'ok',
+        service: 'GrowthNest Tech Solutions Task Portal API',
+        nodeVersion: process.version,
+        isVercel,
+        hasSqlite: Boolean(db),
+        activeStudents: db ? (db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'student'").get()?.count || 0) : 0,
+        timestamp: new Date().toISOString()
+      });
+    }
     // ------------------------------------------------------------------------
     // API: Login
     // ------------------------------------------------------------------------
@@ -223,8 +448,18 @@ const requestHandler = async (req, res) => {
     // API: Student Roadmap & Tasks
     // ------------------------------------------------------------------------
     if (pathname === '/api/student/roadmap' && req.method === 'GET') {
-      const studentId = parsedUrl.searchParams.get('student_id');
-      if (!studentId) return sendJson(res, { error: 'student_id required' }, 400);
+      let studentId = parsedUrl.searchParams.get('student_id');
+      if (!studentId) {
+        const authHeader = req.headers['authorization'];
+        if (authHeader) {
+          try {
+            const token = authHeader.replace('Bearer ', '');
+            const decoded = JSON.parse(Buffer.from(token, 'base64').toString('utf8'));
+            if (decoded && decoded.id) studentId = decoded.id;
+          } catch (e) {}
+        }
+      }
+      if (!studentId) return sendJson(res, { error: 'student_id required or valid Authorization header' }, 400);
 
       const tasksStmt = db.prepare('SELECT * FROM tasks ORDER BY sequence_order ASC');
       const tasks = tasksStmt.all();
@@ -310,14 +545,18 @@ const requestHandler = async (req, res) => {
       let outputUrl = '';
       let screenshotKey = '';
 
-      // Save screenshot/output to local uploads folder (simulates Cloudflare R2)
+      // Store screenshot as persistent Data URL so it is 100% accessible across serverless instances
       if (output_base64) {
-        const ext = file_name ? path.extname(file_name) || '.png' : '.png';
-        screenshotKey = `sub_${student_id}_${task_id}_${Date.now()}${ext}`;
-        const filePath = path.join(UPLOADS_DIR, screenshotKey);
         const cleanBase64 = output_base64.replace(/^data:[^;]+;base64,/, '');
-        fs.writeFileSync(filePath, Buffer.from(cleanBase64, 'base64'));
-        outputUrl = `/api/storage/${screenshotKey}`;
+        outputUrl = output_base64.startsWith('data:') ? output_base64 : `data:image/png;base64,${cleanBase64}`;
+        try {
+          const ext = file_name ? path.extname(file_name) || '.png' : '.png';
+          screenshotKey = `sub_${student_id}_${task_id}_${Date.now()}${ext}`;
+          const filePath = path.join(UPLOADS_DIR, screenshotKey);
+          fs.writeFileSync(filePath, Buffer.from(cleanBase64, 'base64'));
+        } catch (e) {
+          console.warn('Could not write upload file to disk:', e.message);
+        }
       }
 
       const insertStmt = db.prepare(`
@@ -619,14 +858,26 @@ const requestHandler = async (req, res) => {
         res.writeHead(200, { 'Content-Type': contentType });
         return fs.createReadStream(filePath).pipe(res);
       } else {
-        // Return a neat SVG fallback if image not found
+        // Return a clean SVG placeholder
         res.writeHead(200, { 'Content-Type': 'image/svg+xml' });
         return res.end(`<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200" viewBox="0 0 400 200">
           <rect width="100%" height="100%" fill="#f1f5f9"/>
-          <text x="50%" y="45%" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="16">GrowthNest R2 Storage Demo</text>
+          <text x="50%" y="45%" text-anchor="middle" fill="#64748b" font-family="sans-serif" font-size="16">GrowthNest Project Submission Output</text>
           <text x="50%" y="60%" text-anchor="middle" fill="#94a3b8" font-family="sans-serif" font-size="13">${filename}</text>
         </svg>`);
       }
+    }
+
+    // ------------------------------------------------------------------------
+    // API 404 HANDLER: Under no circumstances return HTML for /api/* routes!
+    // ------------------------------------------------------------------------
+    if (pathname.startsWith('/api')) {
+      return sendJson(res, {
+        error: `API route not found: ${pathname} [${req.method}]`,
+        method: req.method,
+        receivedPath: pathname,
+        timestamp: new Date().toISOString()
+      }, 404);
     }
 
     // ------------------------------------------------------------------------
@@ -642,7 +893,7 @@ const requestHandler = async (req, res) => {
       return fs.createReadStream(filePath).pipe(res);
     }
 
-    // If not found, return index.html for SPA routing
+    // SPA fallback ONLY for HTML routes (never for /api/*)
     const indexPath = path.join(PUBLIC_DIR, 'index.html');
     if (fs.existsSync(indexPath)) {
       res.writeHead(200, { 'Content-Type': 'text/html' });

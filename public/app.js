@@ -377,7 +377,7 @@ const app = {
     main.innerHTML = `<p style="text-align:center; padding:40px; color:var(--text-muted);">Loading your curriculum & tasks...</p>`;
 
     try {
-      const res = await fetch(`${API_BASE}/api/student/roadmap`, {
+      const res = await fetch(`${API_BASE}/api/student/roadmap?student_id=${this.currentUser.id}`, {
         headers: { 'Authorization': `Bearer ${this.token}` }
       });
       if (!res.ok) throw new Error('Failed to load student roadmap');
