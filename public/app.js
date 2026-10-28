@@ -1171,13 +1171,13 @@ const app = {
             <label style="font-size:13px; font-weight:700; display:block; margin-bottom:6px; color:var(--dark-navy);">
               Feedback / Remarks for ${this.escape(student.full_name)}:
             </label>
-            <input type="text" id="feedback_${pending_submission.id}" class="form-input" placeholder="Enter mentor feedback..." value="Great work! Requirements satisfied. Approved by GrowthNest Mentor.">
+            <input type="text" id="feedback_${pending_submission.id}" class="form-input" placeholder="Type mentor feedback or click a chip below..." value="">
 
             <div class="feedback-chips-strip">
               <span class="feedback-chip" onclick="app.insertFeedback(${pending_submission.id}, '✓ Excellent clean HTML5 semantic structure! All requirements satisfied.')">✓ Clean Semantics</span>
-              <span class="feedback-chip" onclick="app.insertFeedback(${pending_submission.id}, '✓ Well done! Requirements verified and approved.')">✓ Requirements Met</span>
+              <span class="feedback-chip" onclick="app.insertFeedback(${pending_submission.id}, '✓ Great work! Requirements satisfied. Approved by GrowthNest Mentor.')">✓ Approved</span>
               <span class="feedback-chip" onclick="app.insertFeedback(${pending_submission.id}, '⚠️ Please check closing tags and verify all requirements.')">⚠️ Check Closing Tags</span>
-              <span class="feedback-chip" onclick="app.insertFeedback(${pending_submission.id}, '⚠️ Please format and indent your code properly.')">⚠️ Indent Code</span>
+              <span class="feedback-chip" onclick="app.insertFeedback(${pending_submission.id}, '⚠️ Please review task requirements, update code and resubmit.')">⚠️ Resubmit Needed</span>
             </div>
           </div>
 
@@ -1298,7 +1298,18 @@ const app = {
 
   async adminDecide(submissionId, action) {
     const feedbackInput = document.getElementById(`feedback_${submissionId}`);
-    const feedback = feedbackInput ? feedbackInput.value.trim() : '';
+    let feedback = feedbackInput ? feedbackInput.value.trim() : '';
+
+    const isApprove = action === 'APPROVE';
+    if (!isApprove) {
+      if (!feedback || feedback.toLowerCase().includes('great work') || feedback.toLowerCase().includes('approved')) {
+        feedback = 'Please review task requirements, update your code and resubmit.';
+      }
+    } else {
+      if (!feedback) {
+        feedback = 'Great work! Requirements satisfied. Approved by GrowthNest Mentor.';
+      }
+    }
 
     try {
       const res = await fetch(`${API_BASE}/api/admin/review`, {
