@@ -5,6 +5,7 @@
  */
 
 const http = require('node:http');
+const https = require('node:https');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -342,6 +343,70 @@ function getRequestPathname(req) {
   }
 }
 
+const CLOUDFLARE_WORKER_URL = process.env.CLOUDFLARE_WORKER_URL || 'https://growthnest-task-portal.venkatgrowthnest.workers.dev';
+
+function proxyRequestToCloudflare(req, res, targetPath, search) {
+  const fullPath = targetPath + (search || '');
+  const parsedTarget = new URL(CLOUDFLARE_WORKER_URL);
+
+  const forwardHeaders = { ...req.headers };
+  delete forwardHeaders.host;
+  delete forwardHeaders['content-length'];
+  forwardHeaders['host'] = parsedTarget.hostname;
+  forwardHeaders['x-forwarded-host'] = req.headers.host || '';
+
+  let bodyBuffer = null;
+  if (req.body) {
+    if (typeof req.body === 'string') {
+      bodyBuffer = Buffer.from(req.body);
+    } else if (Buffer.isBuffer(req.body)) {
+      bodyBuffer = req.body;
+    } else {
+      bodyBuffer = Buffer.from(JSON.stringify(req.body));
+      if (!forwardHeaders['content-type']) {
+        forwardHeaders['content-type'] = 'application/json';
+      }
+    }
+    forwardHeaders['content-length'] = bodyBuffer.length;
+  }
+
+  const options = {
+    hostname: parsedTarget.hostname,
+    port: 443,
+    path: fullPath,
+    method: req.method,
+    headers: forwardHeaders
+  };
+
+  const proxyReq = https.request(options, (proxyRes) => {
+    const resHeaders = { ...proxyRes.headers };
+    resHeaders['access-control-allow-origin'] = '*';
+    resHeaders['access-control-allow-headers'] = 'Content-Type, Authorization';
+    resHeaders['access-control-allow-methods'] = 'GET, POST, PUT, DELETE, OPTIONS';
+
+    res.writeHead(proxyRes.statusCode, resHeaders);
+    proxyRes.pipe(res, { end: true });
+  });
+
+  proxyReq.on('error', (err) => {
+    console.error('Proxy to Cloudflare Worker failed:', err);
+    if (!res.headersSent) {
+      res.writeHead(502, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        error: 'Cloudflare Worker backend connection failed',
+        details: err.message
+      }));
+    }
+  });
+
+  if (bodyBuffer) {
+    proxyReq.write(bodyBuffer);
+    proxyReq.end();
+  } else {
+    req.pipe(proxyReq, { end: true });
+  }
+}
+
 const requestHandler = async (req, res) => {
   const pathname = getRequestPathname(req);
   const parsedUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
@@ -354,6 +419,11 @@ const requestHandler = async (req, res) => {
       'Access-Control-Allow-Headers': 'Content-Type, Authorization'
     });
     return res.end();
+  }
+
+  // When deployed on Vercel (or explicitly configured with USE_CF_BACKEND), route /api/* to Cloudflare Worker + D1
+  if ((isVercel || process.env.USE_CF_BACKEND === 'true') && pathname.startsWith('/api')) {
+    return proxyRequestToCloudflare(req, res, pathname, parsedUrl.search);
   }
 
   try {

@@ -14,13 +14,7 @@
     {
       "binding": "DB",
       "database_name": "growthnest-db",
-      "database_id": "growthnest-db-id-placeholder"
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "STORAGE",
-      "bucket_name": "growthnest-submissions"
+      "database_id": "711920ee-a36f-434d-885d-61ba30748d22"
     }
   ],
   "vars": {
