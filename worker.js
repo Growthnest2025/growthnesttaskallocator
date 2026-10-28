@@ -304,6 +304,15 @@ export default {
           return jsonResponse({ error: "Missing student_id or task_id" }, 400);
         }
 
+        const cleanCode = (code_html || sample_code_text || "").trim();
+        if (!cleanCode) {
+          return jsonResponse({ error: "Task source code is required" }, 400);
+        }
+
+        if (!output_base64) {
+          return jsonResponse({ error: "Output screenshot is mandatory. Please upload a screenshot of your rendered output page." }, 400);
+        }
+
         let outputUrl = "";
         let screenshotKey = "";
 
@@ -501,8 +510,6 @@ export default {
           requirements: JSON.parse(sub.requirements_json || "[]")
         }));
 
-        const pendingSubmission = submissions.find(s => s.status === "PENDING") || submissions.find(s => s.status === "CHANGES_REQUESTED") || null;
-
         const allTasksRes = await db
           .prepare("SELECT id, sequence_order, module, title, difficulty, requirements_json FROM tasks ORDER BY sequence_order ASC")
           .all();
@@ -514,6 +521,10 @@ export default {
           .all();
         const progMap = {};
         (progRes.results || []).forEach(p => { progMap[p.current_task_id] = p.status; });
+
+        // Only show pending review for tasks that are NOT already approved!
+        const pendingSubmission = submissions.find(s => s.status === "PENDING" && progMap[s.task_id] !== "APPROVED") ||
+          submissions.find(s => s.status === "CHANGES_REQUESTED" && progMap[s.task_id] !== "APPROVED") || null;
 
         const roadmap = allTasks.map(task => ({
           ...task,

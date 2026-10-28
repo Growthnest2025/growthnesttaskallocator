@@ -685,6 +685,15 @@ const requestHandler = async (req, res) => {
         return sendJson(res, { error: 'student_id and task_id are required' }, 400);
       }
 
+      const cleanCode = (code_html || sample_code_text || '').trim();
+      if (!cleanCode) {
+        return sendJson(res, { error: 'Task source code is required' }, 400);
+      }
+
+      if (!output_base64) {
+        return sendJson(res, { error: 'Output screenshot is mandatory. Please upload a screenshot of your output page.' }, 400);
+      }
+
       let outputUrl = '';
       let screenshotKey = '';
 
@@ -857,9 +866,6 @@ const requestHandler = async (req, res) => {
         requirements: JSON.parse(sub.requirements_json || '[]')
       }));
 
-      // Find newest pending or reviewable submission (if any)
-      const pendingSubmission = submissions.find(s => s.status === 'PENDING') || submissions.find(s => s.status === 'CHANGES_REQUESTED') || null;
-
       // Get progress roadmap for student
       const tasksStmt = db.prepare(`SELECT id, sequence_order, module, title, difficulty, requirements_json FROM tasks ORDER BY sequence_order ASC`);
       const allTasks = tasksStmt.all();
@@ -868,6 +874,10 @@ const requestHandler = async (req, res) => {
       const progRows = progStmt.all(studentId);
       const progMap = {};
       progRows.forEach(p => { progMap[p.current_task_id] = p.status; });
+
+      // Find newest pending or reviewable submission (only for tasks not yet approved)
+      const pendingSubmission = submissions.find(s => s.status === 'PENDING' && progMap[s.task_id] !== 'APPROVED') ||
+        submissions.find(s => s.status === 'CHANGES_REQUESTED' && progMap[s.task_id] !== 'APPROVED') || null;
 
       const roadmap = allTasks.map(task => ({
         ...task,

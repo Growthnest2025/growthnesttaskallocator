@@ -633,9 +633,9 @@ const app = {
 
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-bottom:14px;">
             <div>
-              <label style="font-size:13px; font-weight:700; display:block; margin-bottom:6px;">Screenshot:</label>
+              <label style="font-size:13px; font-weight:700; display:block; margin-bottom:6px;">Output Screenshot: <span style="color:#ef4444; font-size:12px;">* Required</span></label>
               <div class="compact-dropzone" onclick="document.getElementById('taskFilePicker').click()">
-                📸 <span id="filePickedText">Attach Screenshot (.png/.jpg)</span>
+                📸 <span id="filePickedText">Attach Output Screenshot (.png/.jpg)</span>
                 <input type="file" id="taskFilePicker" accept="image/*" style="display:none;" onchange="app.handleFilePick(event)">
               </div>
             </div>
@@ -744,11 +744,41 @@ const app = {
     const file = e.target.files[0];
     if (!file) return;
 
-    document.getElementById('filePickedText').innerText = `✓ Selected: ${file.name}`;
+    if (!file.type.startsWith('image/')) {
+      return this.showToast('Please select a valid image file (.png, .jpg, .webp)', 'error', 'Invalid File');
+    }
+
+    const filePickedText = document.getElementById('filePickedText');
+    if (filePickedText) filePickedText.innerText = `⏳ Processing ${file.name}...`;
+
     const reader = new FileReader();
     reader.onload = ev => {
-      this.currentOutputBase64 = ev.target.result;
-      this.currentOutputName = file.name;
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const maxDim = 1200;
+        let width = img.width;
+        let height = img.height;
+        if (width > height && width > maxDim) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        } else if (height > maxDim) {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        this.currentOutputBase64 = canvas.toDataURL('image/jpeg', 0.85);
+        this.currentOutputName = file.name;
+
+        if (filePickedText) {
+          filePickedText.innerHTML = `✓ Attached: <strong>${this.escape(file.name)}</strong>`;
+        }
+        this.showToast('Output screenshot attached successfully!', 'success', 'Screenshot Ready');
+      };
+      img.src = ev.target.result;
     };
     reader.readAsDataURL(file);
   },
@@ -757,8 +787,24 @@ const app = {
     const code = document.getElementById('taskCodeInput').value;
     const notes = document.getElementById('taskNotesInput').value;
 
-    if (!code.trim() && !this.currentOutputBase64) {
-      this.showToast('Please paste your code or attach an output screenshot before submitting.', 'warning', 'Assignment Incomplete');
+    if (!code.trim()) {
+      this.showToast('Source code is required! Please paste or write your code before submitting.', 'warning', 'Code Required');
+      const codeEl = document.getElementById('taskCodeInput');
+      if (codeEl) codeEl.focus();
+      return;
+    }
+
+    if (!this.currentOutputBase64) {
+      this.showToast('Output screenshot is mandatory! Please upload a screenshot of your output page.', 'warning', 'Screenshot Required');
+      const dropzone = document.querySelector('.compact-dropzone');
+      if (dropzone) {
+        dropzone.style.borderColor = '#ef4444';
+        dropzone.style.background = '#fef2f2';
+        setTimeout(() => {
+          dropzone.style.borderColor = '';
+          dropzone.style.background = '';
+        }, 3500);
+      }
       return;
     }
 
@@ -776,12 +822,15 @@ const app = {
           sample_code_text: code,
           student_notes: notes,
           output_base64: this.currentOutputBase64,
-          file_name: this.currentOutputName || 'screenshot.png'
+          file_name: this.currentOutputName || 'screenshot.jpg'
         })
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Submission failed');
+
+      this.currentOutputBase64 = null;
+      this.currentOutputName = null;
 
       this.showDialog({
         type: 'success',
