@@ -212,11 +212,14 @@ const app = {
           <form onsubmit="app.handleLogin(event, 'student')">
             <div class="form-group">
               <label>Student Username</label>
-              <input type="text" id="loginUsername" class="form-input" required placeholder="Enter your student username">
+              <input type="text" id="loginUsername" class="form-input" required placeholder="Enter student username (e.g. Berlin2005)" autocomplete="username">
             </div>
             <div class="form-group">
-              <label>Password</label>
-              <input type="password" id="loginPassword" class="form-input" required placeholder="Enter password">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <label style="margin-bottom:0;">Password</label>
+                <button type="button" onclick="app.togglePasswordVisibility('loginPassword', this)" style="background:none; border:none; color:var(--emerald-dark); font-size:12px; font-weight:700; cursor:pointer;">👁️ Show Password</button>
+              </div>
+              <input type="password" id="loginPassword" class="form-input" required placeholder="Enter password" autocomplete="current-password">
             </div>
             <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px;">Sign In to Student Portal &rarr;</button>
           </form>
@@ -228,10 +231,13 @@ const app = {
             </div>
             <div class="form-group">
               <label>Username * (for login)</label>
-              <input type="text" id="regUser" class="form-input" required placeholder="Create username">
+              <input type="text" id="regUser" class="form-input" required placeholder="Create username (e.g. Berlin2005)">
             </div>
             <div class="form-group">
-              <label>Password *</label>
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                <label style="margin-bottom:0;">Password *</label>
+                <button type="button" onclick="app.togglePasswordVisibility('regPass', this)" style="background:none; border:none; color:var(--emerald-dark); font-size:12px; font-weight:700; cursor:pointer;">👁️ Show</button>
+              </div>
               <input type="password" id="regPass" class="form-input" required placeholder="Create a password">
             </div>
             <div class="form-group">
@@ -264,10 +270,13 @@ const app = {
         <form onsubmit="app.handleLogin(event, 'admin')">
           <div class="form-group">
             <label>Admin Username</label>
-            <input type="text" id="loginUsername" class="form-input" required placeholder="Enter admin username">
+            <input type="text" id="loginUsername" class="form-input" required placeholder="Enter admin username (e.g. admin)">
           </div>
           <div class="form-group">
-            <label>Password</label>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+              <label style="margin-bottom:0;">Password</label>
+              <button type="button" onclick="app.togglePasswordVisibility('loginPassword', this)" style="background:none; border:none; color:var(--dark-navy); font-size:12px; font-weight:700; cursor:pointer;">👁️ Show</button>
+            </div>
             <input type="password" id="loginPassword" class="form-input" required placeholder="Enter password">
           </div>
           <button type="submit" class="btn btn-gold" style="width: 100%; padding: 12px;">
@@ -1004,6 +1013,8 @@ const app = {
                 <span style="color:var(--emerald-dark); font-weight:700;">⏱️ Time Elapsed: ${student.days_enrolled} Days</span>
                 <span>&bull;</span>
                 <span>🎓 ${this.escape(student.course_track || 'Frontend Development')}</span>
+                <span>&bull;</span>
+                <button type="button" class="btn btn-outline" style="padding:2px 8px; font-size:11px; height:auto; line-height:1.4; border-color:#cbd5e1; color:#334155;" onclick="app.promptResetPassword(${student.id}, '${this.escape(student.username)}')">🔑 Reset Password</button>
               </div>
             </div>
           </div>
@@ -1344,6 +1355,48 @@ const app = {
         document.execCommand('copy');
         this.showToast('Student source code copied to clipboard!', 'success', 'Copied');
       });
+    }
+  },
+
+  togglePasswordVisibility(id, btn) {
+    const input = document.getElementById(id);
+    if (!input) return;
+    if (input.type === 'password') {
+      input.type = 'text';
+      btn.innerHTML = '🙈 Hide';
+    } else {
+      input.type = 'password';
+      btn.innerHTML = '👁️ Show';
+    }
+  },
+
+  async promptResetPassword(studentId, username) {
+    const newPass = prompt(`Enter new password for @${username}:`, 'student123');
+    if (!newPass || !newPass.trim()) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/reset-password`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.token}`
+        },
+        body: JSON.stringify({
+          student_id: studentId,
+          new_password: newPass.trim()
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Password reset failed');
+
+      this.showDialog({
+        type: 'success',
+        title: '✓ Password Reset Successfully',
+        message: `Password for <strong>@${this.escape(username)}</strong> has been updated to: <br><div style="margin:12px 0; background:#f1f5f9; padding:8px 14px; border-radius:6px; font-weight:800; font-size:15px; letter-spacing:0.5px; font-family:monospace; color:var(--dark-navy); text-align:center;">${this.escape(newPass.trim())}</div>The student can now log in with this password immediately.`,
+        confirmText: 'Done'
+      });
+    } catch (err) {
+      this.showToast(err.message, 'error', 'Reset Failed');
     }
   },
 

@@ -71,7 +71,8 @@ VALUES
 (1, 'admin', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', 'admin', 'Lead Trainer / Admin', 'admin@growthnesttech.com', '+91 9876543210', '2026-01-01'),
 (2, 'karthik', '703b0a3d6ad75b649a28adde7d83c6251da457549263bc7ff45ec709b0a8448b', 'student', 'Karthik Raja', 'karthik@growthnest.com', '+91 9876500001', '2026-10-12'),
 (3, 'ananya', '703b0a3d6ad75b649a28adde7d83c6251da457549263bc7ff45ec709b0a8448b', 'student', 'Ananya S', 'ananya@growthnest.com', '+91 9876500002', '2026-10-24'),
-(4, 'Berlin2005', 'dad114b6ed7342bac65c79575f6c7ff761ec26b52c1f5f7a9110532973d05df2', 'student', 'Berlin', 'berlin@growthnest.com', '+91 9876500003', '2026-10-27');
+(4, 'Berlin2005', 'dad114b6ed7342bac65c79575f6c7ff761ec26b52c1f5f7a9110532973d05df2', 'student', 'Berlin', 'berlin@growthnest.com', '6385208839', '2026-10-27'),
+(5, 'Berlin@2005', 'dad114b6ed7342bac65c79575f6c7ff761ec26b52c1f5f7a9110532973d05df2', 'student', 'Berlin', 'berlin@growthnest.com', '6385208839', '2026-10-27');
 
 -- ============================================================================
 -- 23 EXPANDED SEQUENTIAL TASKS: BASIC TO ADVANCED
