@@ -573,9 +573,21 @@ const app = {
       ` : ''}
 
       ${task.state === 'CHANGES_REQUESTED' ? `
-        <div class="task-status-pill status-revision">
-          <span>⚠️</span>
-          <div>Mentor Feedback: <strong>"${this.escape(sub ? sub.admin_feedback : 'Please update code and resubmit.')}"</strong></div>
+        <div class="revision-alert-box">
+          <div class="revision-alert-header">
+            <span class="revision-alert-badge">⚠️ Action Required &bull; Revisions Needed</span>
+            <span class="revision-alert-time">${sub && sub.reviewed_at ? 'Reviewed on ' + sub.reviewed_at.split(' ')[0] : 'Needs Update'}</span>
+          </div>
+          <div class="revision-problem-card">
+            <div class="revision-problem-title">
+              <span>🔍</span>
+              <strong>Mentor Feedback & Code Issues to Fix:</strong>
+            </div>
+            <div class="revision-problem-text">"${this.escape(sub ? sub.admin_feedback : 'Please review task requirements, fix code issues and resubmit.')}"</div>
+          </div>
+          <div class="revision-alert-footer">
+            💡 <strong>How to resolve:</strong> Correct the issues mentioned above in the code submission box below and click <strong>Submit Task</strong>.
+          </div>
         </div>
       ` : ''}
 
@@ -1144,6 +1156,22 @@ const app = {
             </div>
           ` : ''}
 
+          <!-- Automated Code Inspection Quick-Bar -->
+          ${(() => {
+            const scan = this.inspectCode(pending_submission.code_html || pending_submission.sample_code_text);
+            return `
+              <div class="code-inspector-banner">
+                <div class="code-inspector-title">
+                  <span>🤖</span>
+                  <span>Automated Code Check:</span>
+                </div>
+                <div class="code-inspector-msg ${scan.hasIssue ? 'has-issue' : 'looks-good'}">
+                  ${scan.hasIssue ? '⚠️ ' + scan.message : '✓ ' + scan.message}
+                </div>
+              </div>
+            `;
+          })()}
+
           <!-- Submitted Code Box with Copy Feature -->
           <div style="margin-bottom:16px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
@@ -1166,18 +1194,34 @@ const app = {
             </div>
           ` : ''}
 
-          <!-- Mentor Evaluation Form -->
+          <!-- Mentor Evaluation Form with Problem Category Selector -->
           <div style="margin-bottom:18px; border-top:1px solid var(--gold-border); padding-top:16px;">
             <label style="font-size:13px; font-weight:700; display:block; margin-bottom:6px; color:var(--dark-navy);">
-              Feedback / Remarks for ${this.escape(student.full_name)}:
+              Feedback / Problem Note for ${this.escape(student.full_name)}:
             </label>
-            <input type="text" id="feedback_${pending_submission.id}" class="form-input" placeholder="Type mentor feedback or click a chip below..." value="">
+            <input type="text" id="feedback_${pending_submission.id}" class="form-input" placeholder="Click a problem tag below or type what is wrong with the code..." value="">
 
-            <div class="feedback-chips-strip">
-              <span class="feedback-chip" onclick="app.insertFeedback(${pending_submission.id}, '✓ Excellent clean HTML5 semantic structure! All requirements satisfied.')">✓ Clean Semantics</span>
-              <span class="feedback-chip" onclick="app.insertFeedback(${pending_submission.id}, '✓ Great work! Requirements satisfied. Approved by GrowthNest Mentor.')">✓ Approved</span>
-              <span class="feedback-chip" onclick="app.insertFeedback(${pending_submission.id}, '⚠️ Please check closing tags and verify all requirements.')">⚠️ Check Closing Tags</span>
-              <span class="feedback-chip" onclick="app.insertFeedback(${pending_submission.id}, '⚠️ Please review task requirements, update code and resubmit.')">⚠️ Resubmit Needed</span>
+            <div style="margin-top:10px;">
+              <div style="font-size:11.5px; font-weight:800; color:#b91c1c; margin-bottom:5px; text-transform:uppercase; letter-spacing:0.5px; display:flex; align-items:center; gap:4px;">
+                <span>⚠️</span> Code Problems (Click to specify exact issue to student):
+              </div>
+              <div class="feedback-chips-strip" style="margin-bottom:10px;">
+                <span class="feedback-chip chip-problem" onclick="app.insertFeedback(${pending_submission.id}, 'Problem in Code: No valid HTML tags found. Please write actual HTML5 code instead of placeholder text.')">❌ Dummy / Invalid Code</span>
+                <span class="feedback-chip chip-problem" onclick="app.insertFeedback(${pending_submission.id}, 'Problem in Code: Missing <!DOCTYPE html>, <html>, <head>, or <body> root tags.')">❌ Missing HTML Structure</span>
+                <span class="feedback-chip chip-problem" onclick="app.insertFeedback(${pending_submission.id}, 'Problem in Code: Some HTML tags are unclosed or have syntax errors. Please fix tag nesting.')">❌ Unclosed Tags</span>
+                <span class="feedback-chip chip-problem" onclick="app.insertFeedback(${pending_submission.id}, 'Problem in Code: Required semantic tags (<header>, <nav>, <main>, <section>, <footer>) are missing.')">❌ Missing Semantics</span>
+                <span class="feedback-chip chip-problem" onclick="app.insertFeedback(${pending_submission.id}, 'Problem in Code: Required section headings (h1-h3) or text content are missing.')">❌ Missing Headings / Content</span>
+                <span class="feedback-chip chip-problem" onclick="app.insertFeedback(${pending_submission.id}, 'Problem in Code: Task requirements are incomplete. Please review instructions and checklist.')">❌ Incomplete Requirements</span>
+              </div>
+
+              <div style="font-size:11.5px; font-weight:800; color:#15803d; margin-bottom:5px; text-transform:uppercase; letter-spacing:0.5px; display:flex; align-items:center; gap:4px;">
+                <span>✓</span> Approval Remarks:
+              </div>
+              <div class="feedback-chips-strip">
+                <span class="feedback-chip chip-success" onclick="app.insertFeedback(${pending_submission.id}, '✓ Excellent clean HTML5 semantic structure! All requirements satisfied.')">✓ Clean Semantics</span>
+                <span class="feedback-chip chip-success" onclick="app.insertFeedback(${pending_submission.id}, '✓ Well formatted code with proper nesting and structure. Approved!')">✓ Well Formatted</span>
+                <span class="feedback-chip chip-success" onclick="app.insertFeedback(${pending_submission.id}, '✓ Great work! All requirements verified and approved by GrowthNest Mentor.')">✓ Fully Approved</span>
+              </div>
             </div>
           </div>
 
@@ -1609,8 +1653,25 @@ const app = {
     if (el) {
       el.value = text;
       el.focus();
-      this.showToast('Preset feedback template inserted.', 'info', 'Feedback Template');
+      this.showToast('Problem / feedback note inserted.', 'info', 'Feedback Template');
     }
+  },
+
+  inspectCode(code) {
+    const raw = (code || '').trim();
+    if (!raw || raw === 'No code provided') {
+      return { hasIssue: true, message: 'Empty submission (no source code found)' };
+    }
+    if (raw.length < 25 && !raw.includes('<')) {
+      return { hasIssue: true, message: 'Dummy / placeholder text detected (no HTML tags found)' };
+    }
+    if (!raw.includes('<') || !raw.includes('>')) {
+      return { hasIssue: true, message: 'No valid HTML tags detected in submission' };
+    }
+    if (!raw.toLowerCase().includes('<!doctype') && !raw.toLowerCase().includes('<html')) {
+      return { hasIssue: true, message: 'Missing <!DOCTYPE html> or <html> document root' };
+    }
+    return { hasIssue: false, message: 'Valid HTML structure detected' };
   },
 
   getInitials(name) {
