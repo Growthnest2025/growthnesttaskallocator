@@ -501,7 +501,7 @@ export default {
           requirements: JSON.parse(sub.requirements_json || "[]")
         }));
 
-        const pendingSubmission = submissions.find(s => s.status === "PENDING") || null;
+        const pendingSubmission = submissions.find(s => s.status === "PENDING") || submissions.find(s => s.status === "CHANGES_REQUESTED") || null;
 
         const allTasksRes = await db
           .prepare("SELECT id, sequence_order, module, title, difficulty, requirements_json FROM tasks ORDER BY sequence_order ASC")

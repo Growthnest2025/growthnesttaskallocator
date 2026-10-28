@@ -1136,9 +1136,15 @@ const app = {
           <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
             <div>
               <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
-                <span class="student-notif-pill">
-                  <span class="pulse-dot"></span> 🔔 Awaiting Mentor Review
-                </span>
+                ${pending_submission.status === 'CHANGES_REQUESTED' ? `
+                  <span class="student-notif-pill" style="background:#fee2e2; color:#991b1b; border-color:#fca5a5;">
+                    ⚠️ In Revisions Needed &bull; Ready to Approve
+                  </span>
+                ` : `
+                  <span class="student-notif-pill">
+                    <span class="pulse-dot"></span> 🔔 Awaiting Mentor Review
+                  </span>
+                `}
                 <span class="step-badge step-badge-${pending_submission.task_module.toLowerCase()}">${pending_submission.task_module} Module</span>
               </div>
               <h3 style="font-size:18px; font-weight:800; color:var(--dark-navy);">
@@ -1149,6 +1155,12 @@ const app = {
               Submitted: <strong>${new Date(pending_submission.submitted_at).toLocaleString()}</strong>
             </div>
           </div>
+
+          ${pending_submission.status === 'CHANGES_REQUESTED' ? `
+            <div style="background:#fffbeb; border:1px solid #fde68a; color:#92400e; padding:10px 14px; border-radius:6px; font-size:12.5px; margin-bottom:14px; line-height:1.5;">
+              ⚠️ <strong>Current Status: Changes Requested.</strong> Mentor noted: <em>"${this.escape(pending_submission.admin_feedback)}"</em>. If student completed changes or code is satisfactory, click <strong>"✓ Approve & Unlock Next Task"</strong> below to change status to Approved.
+            </div>
+          ` : ''}
 
           ${pending_submission.student_notes ? `
             <div style="background:#f8fafc; border-left:3px solid var(--emerald); padding:10px 14px; font-size:13px; margin-bottom:16px; border-radius:4px; color:#334155;">
@@ -1292,9 +1304,16 @@ const app = {
                       <td style="font-size:12px; color:var(--text-muted);">${new Date(sub.submitted_at).toLocaleString()}</td>
                       <td style="font-size:12.5px; color:#334155;">${this.escape(sub.admin_feedback || '—')}</td>
                       <td>
-                        <button class="btn btn-outline btn-sm" onclick="app.viewCodeModal('${this.escape(sub.task_title)}', ${sub.id})">
-                          Inspect Code
-                        </button>
+                        <div style="display:flex; gap:6px; align-items:center;">
+                          <button class="btn btn-outline btn-sm" onclick="app.viewCodeModal('${this.escape(sub.task_title)}', ${sub.id})">
+                            Inspect Code
+                          </button>
+                          ${sub.status !== 'APPROVED' ? `
+                            <button class="btn btn-success btn-sm" style="padding:4px 10px; font-size:11.5px; white-space:nowrap;" onclick="app.quickApproveSubmission(${sub.id}, '${this.escape(sub.task_title)}')">
+                              ✓ Approve
+                            </button>
+                          ` : ''}
+                        </div>
                       </td>
                     </tr>
                   `;
@@ -1404,8 +1423,33 @@ const app = {
             <img src="${sub.output_url}" style="max-width:100%; max-height:220px; border-radius:6px; border:1px solid var(--border);">
           </div>
         ` : ''}
+        <div style="margin-top:16px; display:flex; justify-content:flex-end; align-items:center; gap:10px; border-top:1px solid var(--border); padding-top:12px;">
+          <button class="btn btn-outline btn-sm" onclick="app.closeModal('imagePreviewModal')">Close</button>
+          ${sub.status !== 'APPROVED' ? `
+            <button class="btn btn-success btn-sm" onclick="app.closeModal('imagePreviewModal'); app.quickApproveSubmission(${sub.id}, '${this.escape(title)}')">
+              ✓ Approve Submission & Unlock Next Task
+            </button>
+          ` : '<span style="color:var(--emerald); font-weight:700; font-size:13px;">✓ Already Approved</span>'}
+        </div>
       </div>
     `;
+  },
+
+  async quickApproveSubmission(subId, taskTitle) {
+    this.showDialog({
+      type: 'confirm',
+      title: 'Approve Submission?',
+      message: `Do you want to approve <strong>${this.escape(taskTitle || 'this task')}</strong> and unlock the next milestone for this student?`,
+      confirmText: '✓ Yes, Approve',
+      cancelText: 'Cancel',
+      onConfirm: async () => {
+        const feedbackInput = document.getElementById(`feedback_${subId}`);
+        if (feedbackInput && !feedbackInput.value) {
+          feedbackInput.value = 'Great work! Requirements satisfied. Approved by GrowthNest Mentor.';
+        }
+        await this.adminDecide(subId, 'APPROVE');
+      }
+    });
   },
 
   async handleAdminEnroll(e) {

@@ -857,8 +857,8 @@ const requestHandler = async (req, res) => {
         requirements: JSON.parse(sub.requirements_json || '[]')
       }));
 
-      // Find newest pending submission (if any)
-      const pendingSubmission = submissions.find(s => s.status === 'PENDING') || null;
+      // Find newest pending or reviewable submission (if any)
+      const pendingSubmission = submissions.find(s => s.status === 'PENDING') || submissions.find(s => s.status === 'CHANGES_REQUESTED') || null;
 
       // Get progress roadmap for student
       const tasksStmt = db.prepare(`SELECT id, sequence_order, module, title, difficulty, requirements_json FROM tasks ORDER BY sequence_order ASC`);
