@@ -86,6 +86,7 @@ const app = {
         </button>
       ` : ''}
       <div class="user-pill ${isAdm ? 'admin-pill' : 'student-pill'}">
+        ${!isAdm && u.avatar_url ? `<img src="${u.avatar_url}" alt="" class="nav-avatar-img">` : ''}
         ${isAdm ? '🛡️ Admin' : `🎓 ${this.escape(u.full_name || u.username)}`}
       </div>
       <button class="nav-logout-btn" onclick="app.logout()">Sign Out</button>
@@ -429,8 +430,16 @@ const app = {
       <!-- Student Profile & Progress Banner -->
       <div class="student-hero-banner">
         <div style="display:flex; align-items:center; gap:14px;">
-          <div class="student-avatar" style="width:48px; height:48px; font-size:18px;">
-            ${this.getInitials(u.full_name)}
+          <div class="student-avatar-wrapper" onclick="document.getElementById('avatarFileInput').click()" title="Click to upload or change profile photo">
+            ${u.avatar_url ? `
+              <img src="${u.avatar_url}" alt="Profile" class="student-avatar-img">
+            ` : `
+              <div class="student-avatar" style="width:52px; height:52px; font-size:18px;">
+                ${this.getInitials(u.full_name)}
+              </div>
+            `}
+            <div class="avatar-camera-pill" title="Upload Photo">📷</div>
+            <input type="file" id="avatarFileInput" accept="image/*" style="display:none;" onchange="app.handleAvatarUpload(event)">
           </div>
           <div>
             <h2 style="font-size:20px; font-weight:800; color:var(--dark-navy);">${this.escape(u.full_name)}</h2>
@@ -440,6 +449,8 @@ const app = {
               <span style="color:var(--emerald-dark); font-weight:700;">⏱️ Day ${u.days_enrolled}</span>
               <span>&bull;</span>
               <span>${this.escape(u.course_track || 'Frontend Development')}</span>
+              <span>&bull;</span>
+              <button type="button" class="btn btn-outline" style="padding:1px 8px; font-size:11px; height:auto; line-height:1.4; border-radius:12px;" onclick="document.getElementById('avatarFileInput').click()">📷 Change Photo</button>
             </div>
           </div>
         </div>
@@ -642,6 +653,74 @@ const app = {
         </div>
       ` : ''}
     `;
+  },
+
+  async handleAvatarUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      return this.showToast('Please select a valid image file (.png, .jpg, .webp)', 'error', 'Invalid File');
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      return this.showToast('Please choose an image under 5MB', 'warning', 'File Too Large');
+    }
+
+    this.showToast('Processing photo...', 'info', 'Uploading');
+
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const img = new Image();
+      img.onload = async () => {
+        const canvas = document.createElement('canvas');
+        const maxDim = 400;
+        let width = img.width;
+        let height = img.height;
+        if (width > height) {
+          if (width > maxDim) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          }
+        } else {
+          if (height > maxDim) {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressedBase64 = canvas.toDataURL('image/jpeg', 0.85);
+
+        try {
+          const res = await fetch(`${API_BASE}/api/student/update-avatar`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${this.token}`
+            },
+            body: JSON.stringify({
+              student_id: this.currentUser.id,
+              avatar_data: compressedBase64
+            })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Upload failed');
+
+          this.currentUser.avatar_url = data.avatar_url;
+          localStorage.setItem('gn_user', JSON.stringify(this.currentUser));
+          this.renderNav();
+          await this.loadPortal();
+          this.showToast('Profile photo updated successfully!', 'success', 'Photo Updated');
+        } catch (err) {
+          this.showToast(err.message, 'error', 'Upload Failed');
+        }
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
   },
 
   handleFilePick(e) {
@@ -932,9 +1011,13 @@ const app = {
                 <div class="student-card-item ${isSelected ? 'selected' : ''}" onclick="app.selectStudentAndReview(${s.id})">
                   <div class="student-card-header">
                     <div style="display:flex; align-items:center; gap:10px;">
-                      <div class="student-avatar">
-                        ${this.getInitials(s.full_name)}
-                      </div>
+                      ${s.avatar_url ? `
+                        <img src="${s.avatar_url}" alt="" class="student-avatar-img" style="width:38px; height:38px;">
+                      ` : `
+                        <div class="student-avatar">
+                          ${this.getInitials(s.full_name)}
+                        </div>
+                      `}
                       <div>
                         <div class="student-name-text">${this.escape(s.full_name)}</div>
                         <div class="student-username-text">@${this.escape(s.username)}</div>
@@ -994,9 +1077,13 @@ const app = {
       <div class="student-profile-hero">
         <div class="profile-top-bar">
           <div style="display:flex; align-items:center; gap:14px;">
-            <div class="student-avatar" style="width:48px; height:48px; font-size:17px;">
-              ${this.getInitials(student.full_name)}
-            </div>
+            ${student.avatar_url ? `
+              <img src="${student.avatar_url}" alt="" class="student-avatar-img" style="width:48px; height:48px;">
+            ` : `
+              <div class="student-avatar" style="width:48px; height:48px; font-size:17px;">
+                ${this.getInitials(student.full_name)}
+              </div>
+            `}
             <div>
               <div style="display:flex; align-items:center; gap:10px;">
                 <h2 style="font-size:20px; font-weight:800; color:var(--dark-navy);">${this.escape(student.full_name)}</h2>

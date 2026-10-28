@@ -1881,3 +1881,51 @@ footer strong {
   background: #f0fdf4;
   color: var(--emerald-dark);
 }
+
+/* Student Avatar Upload & Image Styles */
+.student-avatar-wrapper {
+  position: relative;
+  display: inline-block;
+  cursor: pointer;
+  border-radius: 50%;
+  transition: transform 0.15s ease;
+}
+
+.student-avatar-wrapper:hover {
+  transform: scale(1.04);
+}
+
+.student-avatar-img {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid var(--emerald);
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);
+}
+
+.avatar-camera-pill {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
+}
+
+.nav-avatar-img {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: cover;
+  margin-right: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+}
+

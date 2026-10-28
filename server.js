@@ -211,6 +211,12 @@ function createMemoryDbFallback() {
             if (u) u.password_hash = newHash;
             return { changes: 1 };
           }
+          if (s.includes('UPDATE users SET avatar_url = ?')) {
+            const [newAvatar, uid] = params;
+            const u = users.find(x => x.id === Number(uid));
+            if (u) u.avatar_url = newAvatar;
+            return { changes: 1 };
+          }
           return { lastInsertRowid: 1, changes: 1 };
         }
       };
@@ -234,6 +240,7 @@ if (DatabaseSync) {
       db.exec(schemaSql);
       console.log('✓ SQLite Database initialized from schema.sql');
     }
+    try { db.exec('ALTER TABLE users ADD COLUMN avatar_url TEXT;'); } catch (e) {}
   } catch (err) {
     console.warn('Could not initialize file SQLite DB, trying in-memory SQLite:', err.message);
     try {
@@ -241,6 +248,7 @@ if (DatabaseSync) {
       if (fs.existsSync(SCHEMA_FILE)) {
         db.exec(fs.readFileSync(SCHEMA_FILE, 'utf8'));
       }
+      try { db.exec('ALTER TABLE users ADD COLUMN avatar_url TEXT;'); } catch (e) {}
     } catch (e2) {
       db = createMemoryDbFallback();
     }
@@ -425,6 +433,7 @@ const requestHandler = async (req, res) => {
           role: user.role,
           joining_date: user.joining_date,
           course_track: user.course_track,
+          avatar_url: user.avatar_url || null,
           days_enrolled: calculateDaysEnrolled(user.joining_date)
         }
       });
@@ -501,6 +510,7 @@ const requestHandler = async (req, res) => {
           role: user.role,
           joining_date: user.joining_date,
           course_track: user.course_track,
+          avatar_url: user.avatar_url || null,
           days_enrolled: calculateDaysEnrolled(user.joining_date)
         }
       });
@@ -653,6 +663,47 @@ const requestHandler = async (req, res) => {
     }
 
     // ------------------------------------------------------------------------
+    // API: Student Update Profile Picture / Avatar
+    // ------------------------------------------------------------------------
+    if (pathname === '/api/student/update-avatar' && req.method === 'POST') {
+      const authHeader = req.headers['authorization'];
+      let userId = null;
+      if (authHeader) {
+        try {
+          const token = authHeader.replace('Bearer ', '');
+          const decoded = JSON.parse(Buffer.from(token, 'base64').toString('utf8'));
+          if (decoded && decoded.id) userId = decoded.id;
+        } catch (e) {}
+      }
+
+      const { avatar_data, student_id } = await parseJsonBody(req);
+      const targetId = userId || student_id;
+      if (!targetId || !avatar_data) {
+        return sendJson(res, { error: 'Target student ID and avatar_data are required' }, 400);
+      }
+
+      let avatarUrl = avatar_data;
+      if (avatar_data.startsWith('data:image/')) {
+        const matches = avatar_data.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+        if (matches) {
+          const ext = matches[1].replace('jpeg', 'jpg');
+          const base64Content = matches[2];
+          const filename = `avatar_${targetId}_${Date.now()}.${ext}`;
+          const filePath = path.join(UPLOADS_DIR, filename);
+          try {
+            fs.writeFileSync(filePath, Buffer.from(base64Content, 'base64'));
+            avatarUrl = `/api/storage/${filename}`;
+          } catch (e) {
+            avatarUrl = avatar_data;
+          }
+        }
+      }
+
+      db.prepare(`UPDATE users SET avatar_url = ? WHERE id = ?`).run(avatarUrl, Number(targetId));
+      return sendJson(res, { success: true, avatar_url: avatarUrl, message: 'Profile picture updated successfully!' });
+    }
+
+    // ------------------------------------------------------------------------
     // API: Admin KPI Stats (Real Database Counts)
     // ------------------------------------------------------------------------
     if (pathname === '/api/admin/stats' && req.method === 'GET') {
@@ -674,7 +725,7 @@ const requestHandler = async (req, res) => {
     // ------------------------------------------------------------------------
     if (pathname === '/api/admin/students' && req.method === 'GET') {
       const stmt = db.prepare(`
-        SELECT id, username, full_name, email, phone, joining_date, course_track, created_at
+        SELECT id, username, full_name, email, phone, joining_date, course_track, created_at, avatar_url
         FROM users WHERE role = 'student' ORDER BY id DESC
       `);
       const students = stmt.all();
@@ -716,7 +767,7 @@ const requestHandler = async (req, res) => {
       const studentId = Number(parsedUrl.searchParams.get('student_id'));
       if (!studentId) return sendJson(res, { error: 'student_id query parameter is required' }, 400);
 
-      const studentStmt = db.prepare(`SELECT id, username, full_name, email, phone, joining_date, course_track FROM users WHERE id = ?`);
+      const studentStmt = db.prepare(`SELECT id, username, full_name, email, phone, joining_date, course_track, avatar_url FROM users WHERE id = ?`);
       const student = studentStmt.get(studentId);
       if (!student) return sendJson(res, { error: 'Student not found' }, 404);
 

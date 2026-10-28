@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS users (
   phone TEXT,
   joining_date TEXT NOT NULL,
   course_track TEXT NOT NULL DEFAULT 'Frontend Web Development (HTML/CSS/JS)',
+  avatar_url TEXT,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
