@@ -426,36 +426,35 @@ const app = {
     const task = this.roadmap.find(t => t.id === this.selectedTaskId) || this.roadmap[0];
 
     main.innerHTML = `
-      <!-- Student Profile & Real Elapsed Time Summary Card -->
-      <div class="card" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+      <!-- Student Profile & Progress Banner -->
+      <div class="student-hero-banner">
         <div style="display:flex; align-items:center; gap:14px;">
           <div class="student-avatar" style="width:48px; height:48px; font-size:18px;">
             ${this.getInitials(u.full_name)}
           </div>
           <div>
             <h2 style="font-size:20px; font-weight:800; color:var(--dark-navy);">${this.escape(u.full_name)}</h2>
-            <div style="font-size:13px; color:var(--text-muted); display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:2px;">
-              <span>👤 @${this.escape(u.username)}</span>
+            <div style="font-size:13px; color:var(--text-muted); display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:2px;">
+              <span>@${this.escape(u.username)}</span>
               <span>&bull;</span>
-              <span>📅 Joined: <strong>${u.joining_date}</strong></span>
+              <span style="color:var(--emerald-dark); font-weight:700;">⏱️ Day ${u.days_enrolled}</span>
               <span>&bull;</span>
-              <span style="color:var(--emerald-dark); font-weight:700;">⏱️ Day ${u.days_enrolled} Active</span>
+              <span>${this.escape(u.course_track || 'Frontend Development')}</span>
             </div>
           </div>
         </div>
         <div style="text-align:right;">
-          <div style="font-size:12px; color:var(--text-muted); font-weight:600;">Curriculum Progress</div>
-          <div style="font-size:22px; font-weight:800; color:var(--emerald-dark);">${data.completed_tasks} / ${data.total_tasks} <span style="font-size:13px; font-weight:600; color:var(--text-muted);">Tasks</span></div>
-          <div style="font-size:11.5px; color:var(--text-muted);">${data.progress_percent}% Completed</div>
+          <div style="font-size:12px; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Curriculum</div>
+          <div style="font-size:20px; font-weight:800; color:var(--emerald-dark);">${data.completed_tasks} / ${data.total_tasks} <span style="font-size:13px; font-weight:600; color:var(--text-muted);">Tasks</span></div>
         </div>
       </div>
 
-      <!-- Progressive 23-Task Horizontal Stepper Strip -->
-      <div style="margin-bottom: 8px; display:flex; justify-content:space-between; align-items:center;">
+      <!-- Progressive 23-Task Stepper Strip -->
+      <div style="margin-bottom: 10px; display:flex; justify-content:space-between; align-items:center;">
         <h3 style="font-size: 15px; font-weight: 800; color: var(--dark-navy);">
-          📚 23-Step Curriculum (Sequential Unlock)
+          📚 Curriculum Track (23 Tasks)
         </h3>
-        <span style="font-size: 12px; color: var(--text-muted);">Tasks unlock strictly one after another</span>
+        <span style="font-size: 12px; color: var(--emerald-dark); font-weight:700;">${data.progress_percent}% Progress</span>
       </div>
 
       <div class="roadmap-strip">
@@ -471,15 +470,15 @@ const app = {
           } else if (t.state === 'UNDER_REVIEW') {
             stateClass = 'active';
             icon = '⏳';
-            label = 'Under Review';
+            label = 'In Review';
           } else if (t.state === 'CHANGES_REQUESTED') {
             stateClass = 'active';
             icon = '⚠️';
-            label = 'Revise Code';
+            label = 'Revise';
           } else if (t.state === 'ACTIVE') {
             stateClass = 'active';
             icon = '🚀';
-            label = 'Active Task';
+            label = 'Active';
           } else {
             stateClass = 'locked';
           }
@@ -501,7 +500,7 @@ const app = {
       </div>
 
       <!-- Task Details and Submission Workspace -->
-      <div class="card">
+      <div class="card" style="box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05); border-radius:14px;">
         ${this.renderStudentTaskDetail(task)}
       </div>
     `;
@@ -515,7 +514,7 @@ const app = {
       this.showDialog({
         type: 'lock',
         title: `🔒 Task ${task.sequence_order} is Locked`,
-        message: `Assignments unlock strictly in sequence! Complete and obtain mentor approval for <strong>Task ${task.sequence_order - 1}${prevTask ? ': ' + this.escape(prevTask.title) : ''}</strong> first to unlock this milestone.`,
+        message: `Complete and obtain approval for <strong>Task ${task.sequence_order - 1}${prevTask ? ': ' + this.escape(prevTask.title) : ''}</strong> first to unlock this milestone.`,
         confirmText: 'Go to Active Task',
         cancelText: 'Close',
         onConfirm: () => {
@@ -539,94 +538,87 @@ const app = {
     const sub = task.submission;
 
     return `
-      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px; flex-wrap:wrap; gap:8px;">
+      <!-- Task Header -->
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
         <div>
-          <span class="step-badge step-badge-${task.module.toLowerCase()}">${task.module} Module &bull; Task ${task.sequence_order}</span>
-          <h2 style="font-size:20px; font-weight:800; color:var(--dark-navy); margin-top:2px;">${this.escape(task.title)}</h2>
-          <div style="font-size:12px; color:var(--text-muted); margin-top:2px;">Difficulty: <strong>${task.difficulty}</strong></div>
+          <span class="step-badge step-badge-${task.module.toLowerCase()}">${task.module} &bull; Task ${task.sequence_order}</span>
+          <span class="req-chip" style="padding:2px 8px; font-size:11px; margin-left:6px;">${task.difficulty}</span>
+          <h2 style="font-size:19px; font-weight:800; color:var(--dark-navy); margin-top:4px;">${this.escape(task.title)}</h2>
         </div>
         <div>
-          ${task.state === 'COMPLETED' ? '<span class="home-badge-pill" style="background:var(--success-bg); color:var(--emerald-deep); border-color:var(--success-border);">✓ Task Approved & Completed</span>' : ''}
-          ${task.state === 'UNDER_REVIEW' ? '<span class="home-badge-pill" style="background:var(--gold-light); color:var(--gold-deep); border-color:var(--gold-border);">⏳ Awaiting Mentor Review</span>' : ''}
-          ${task.state === 'CHANGES_REQUESTED' ? '<span class="home-badge-pill" style="background:var(--danger-bg); color:var(--danger); border-color:var(--danger-border);">⚠️ Changes Requested</span>' : ''}
-          ${task.state === 'ACTIVE' ? '<span class="home-badge-pill" style="background:var(--emerald-light); color:var(--emerald-deep); border-color:var(--emerald-border);">🚀 Active Assignment</span>' : ''}
+          ${task.state === 'COMPLETED' ? '<span class="home-badge-pill" style="background:var(--success-bg); color:var(--emerald-deep); border-color:var(--success-border);">✓ Approved</span>' : ''}
+          ${task.state === 'UNDER_REVIEW' ? '<span class="home-badge-pill" style="background:var(--gold-light); color:var(--gold-deep); border-color:var(--gold-border);">⏳ In Review</span>' : ''}
+          ${task.state === 'CHANGES_REQUESTED' ? '<span class="home-badge-pill" style="background:var(--danger-bg); color:var(--danger); border-color:var(--danger-border);">⚠️ Revisions Needed</span>' : ''}
+          ${task.state === 'ACTIVE' ? '<span class="home-badge-pill" style="background:var(--emerald-light); color:var(--emerald-deep); border-color:var(--emerald-border);">🚀 Active</span>' : ''}
         </div>
       </div>
 
+      <!-- Clean Status Notification (concise, no text clutter) -->
       ${task.state === 'UNDER_REVIEW' ? `
-        <div class="alert-box alert-warning">
-          <span style="font-size:20px;">⏳</span>
-          <div>
-            <strong>Submission Received!</strong><br>
-            Your code and output screenshot have been submitted and are in the GrowthNest mentor review queue. Once approved, Task ${task.sequence_order + 1} will automatically unlock!
-          </div>
+        <div class="task-status-pill status-review">
+          <span>⏳</span>
+          <div>Submission in mentor review queue. Next task unlocks upon approval.</div>
         </div>
       ` : ''}
 
       ${task.state === 'CHANGES_REQUESTED' ? `
-        <div class="alert-box alert-danger">
-          <span style="font-size:20px;">⚠️</span>
-          <div>
-            <strong>Mentor Feedback / Revision Required:</strong><br>
-            "${this.escape(sub ? sub.admin_feedback : 'Please update code according to requirements.')}"<br>
-            <small>Please revise your code in the box below and resubmit.</small>
-          </div>
+        <div class="task-status-pill status-revision">
+          <span>⚠️</span>
+          <div>Mentor Feedback: <strong>"${this.escape(sub ? sub.admin_feedback : 'Please update code and resubmit.')}"</strong></div>
         </div>
       ` : ''}
 
       ${task.state === 'COMPLETED' ? `
-        <div class="alert-box alert-success">
-          <span style="font-size:20px;">🎉</span>
-          <div>
-            <strong>Task Approved by Mentor!</strong><br>
-            Feedback: "${this.escape(sub && sub.admin_feedback ? sub.admin_feedback : 'Well done! Requirement checklist satisfied.')}"
-          </div>
+        <div class="task-status-pill status-approved">
+          <span>🎉</span>
+          <div>Task Approved! Mentor Feedback: "${this.escape(sub && sub.admin_feedback ? sub.admin_feedback : 'Great work!')}"</div>
         </div>
       ` : ''}
 
-      <div style="margin-bottom: 22px;">
-        <h4 style="font-size:14px; font-weight:700; margin-bottom:4px; color:var(--dark-navy);">Task Goal:</h4>
-        <p style="font-size:13.5px; color:#334155; margin-bottom:14px;">${this.escape(task.description)}</p>
-
-        <h4 style="font-size:14px; font-weight:700; margin-bottom:4px; color:var(--dark-navy);">Detailed Instructions:</h4>
-        <p style="font-size:13px; color:#475569; margin-bottom:14px; line-height:1.5;">${this.escape(task.instructions)}</p>
-
-        <h4 style="font-size:14px; font-weight:700; margin-bottom:6px; color:var(--dark-navy);">Requirements Checklist:</h4>
-        <ul style="font-size:13px; color:#334155; margin-left:20px; line-height:1.6;">
-          ${(task.requirements || []).map(r => `<li>${this.escape(r)}</li>`).join('')}
-        </ul>
+      <!-- Clean Compact Brief (Replaces long paragraphs) -->
+      <div class="task-brief-box">
+        <p class="task-brief-text">${this.escape(task.description)}</p>
       </div>
 
-      <!-- Student Submission Workspace: Code Box is 100% EMPTY by default! -->
-      ${task.state === 'ACTIVE' || task.state === 'CHANGES_REQUESTED' ? `
-        <div style="border-top:1px solid var(--border); padding-top:20px;">
-          <h3 style="font-size:16px; font-weight:800; color:var(--dark-navy); margin-bottom:14px;">
-            📝 Submit Your Assignment
-          </h3>
+      <!-- Key Checklist Chips -->
+      ${task.requirements && task.requirements.length > 0 ? `
+        <div class="task-req-chips">
+          ${task.requirements.map(r => `<span class="req-chip">✓ ${this.escape(r)}</span>`).join('')}
+        </div>
+      ` : ''}
 
-          <div class="form-group">
-            <label>1. Paste Your Source Code (HTML / CSS / JavaScript):</label>
-            <!-- 100% EMPTY BY DEFAULT - NO DUMMY DEFAULT CODE -->
+      <!-- Collapsible Detailed Instructions (Hidden by default to keep dashboard neat) -->
+      <details class="instructions-accordion">
+        <summary>📘 View Instructions Guide</summary>
+        <div class="instructions-body">${this.escape(task.instructions)}</div>
+      </details>
+
+      <!-- Student Submission Workspace -->
+      ${task.state === 'ACTIVE' || task.state === 'CHANGES_REQUESTED' ? `
+        <div style="border-top:1px solid var(--border); padding-top:18px;">
+          <h3 class="workspace-heading">📝 Submit Assignment</h3>
+
+          <div class="form-group" style="margin-bottom:12px;">
+            <label style="font-size:13px;">Source Code (HTML / CSS / JS):</label>
             <textarea id="taskCodeInput" class="code-box" placeholder="Write or paste your complete code here...">${this.escape(sub ? (sub.code_html || sub.sample_code_text) : '')}</textarea>
           </div>
 
-          <div class="form-group">
-            <label>2. Attach Output Screenshot:</label>
-            <div class="file-dropzone" onclick="document.getElementById('taskFilePicker').click()">
-              <div style="font-size: 28px;">📸</div>
-              <div style="font-weight: 700; margin-top: 4px; color:var(--dark-navy);">Click to select output screenshot (.png, .jpg)</div>
-              <div id="filePickedText" style="font-size: 12px; color: var(--emerald); margin-top: 4px; font-weight:700;"></div>
-              <input type="file" id="taskFilePicker" accept="image/*" style="display:none;" onchange="app.handleFilePick(event)">
+          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-bottom:14px;">
+            <div>
+              <label style="font-size:13px; font-weight:700; display:block; margin-bottom:6px;">Screenshot:</label>
+              <div class="compact-dropzone" onclick="document.getElementById('taskFilePicker').click()">
+                📸 <span id="filePickedText">Attach Screenshot (.png/.jpg)</span>
+                <input type="file" id="taskFilePicker" accept="image/*" style="display:none;" onchange="app.handleFilePick(event)">
+              </div>
+            </div>
+            <div>
+              <label style="font-size:13px; font-weight:700; display:block; margin-bottom:6px;">Notes (Optional):</label>
+              <input type="text" id="taskNotesInput" class="form-input" style="height:48px;" placeholder="Notes for mentor..." value="${this.escape(sub ? sub.student_notes || '' : '')}">
             </div>
           </div>
 
-          <div class="form-group">
-            <label>3. Notes for Mentor (Optional):</label>
-            <input type="text" id="taskNotesInput" class="form-input" placeholder="e.g. Tested in browser, responsive on all devices." value="${this.escape(sub ? sub.student_notes || '' : '')}">
-          </div>
-
-          <div style="text-align:right; margin-top:16px;">
-            <button class="btn btn-primary" onclick="app.submitActiveTask(${task.id})">
+          <div style="text-align:right;">
+            <button class="btn btn-primary" style="padding:10px 22px;" onclick="app.submitActiveTask(${task.id})">
               🚀 Submit Task for Approval
             </button>
           </div>
@@ -634,14 +626,17 @@ const app = {
       ` : ''}
 
       ${(task.state === 'UNDER_REVIEW' || task.state === 'COMPLETED') && sub ? `
-        <div style="border-top:1px solid var(--border); padding-top:18px;">
-          <h4 style="font-size:14px; font-weight:700; margin-bottom:8px; color:var(--dark-navy);">Your Submitted Code:</h4>
-          <textarea class="code-box" readonly style="height:150px;">${this.escape(sub.code_html || sub.sample_code_text || '')}</textarea>
+        <div style="border-top:1px solid var(--border); padding-top:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <h4 style="font-size:13.5px; font-weight:700; color:var(--dark-navy);">Submitted Code:</h4>
+            <button class="btn btn-outline btn-sm" onclick="app.copyCodeToClipboard('submittedCodeBox')">📋 Copy</button>
+          </div>
+          <textarea id="submittedCodeBox" class="code-box" readonly style="height:140px;">${this.escape(sub.code_html || sub.sample_code_text || '')}</textarea>
 
           ${sub.output_url ? `
-            <div style="margin-top:14px;">
-              <strong style="font-size:13px; display:block; margin-bottom:6px; color:var(--dark-navy);">Your Uploaded Screenshot:</strong>
-              <img src="${sub.output_url}" alt="Output Screenshot" style="max-width:100%; max-height:220px; border-radius:8px; border:1px solid var(--border); cursor:pointer;" onclick="app.previewImage('${sub.output_url}')">
+            <div style="margin-top:12px;">
+              <strong style="font-size:12.5px; display:block; margin-bottom:4px; color:var(--dark-navy);">Uploaded Screenshot:</strong>
+              <img src="${sub.output_url}" alt="Output Screenshot" style="max-width:100%; max-height:200px; border-radius:6px; border:1px solid var(--border); cursor:pointer;" onclick="app.previewImage('${sub.output_url}')">
             </div>
           ` : ''}
         </div>
