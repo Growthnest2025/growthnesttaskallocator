@@ -939,6 +939,41 @@ const requestHandler = async (req, res) => {
     }
 
     // ------------------------------------------------------------------------
+    // API: Admin Remove / Delete Student
+    // ------------------------------------------------------------------------
+    if (pathname === '/api/admin/students' && req.method === 'DELETE') {
+      let studentId = parsedUrl.searchParams.get('student_id') || parsedUrl.searchParams.get('id');
+      if (!studentId) {
+        try {
+          const body = await parseJsonBody(req);
+          studentId = body.student_id || body.id;
+        } catch (e) {}
+      }
+
+      if (!studentId) {
+        return sendJson(res, { error: 'student_id is required' }, 400);
+      }
+
+      const sid = Number(studentId);
+      const target = db.prepare('SELECT id, role, full_name FROM users WHERE id = ?').get(sid);
+      if (!target) {
+        return sendJson(res, { error: 'Student not found' }, 404);
+      }
+      if (target.role === 'admin') {
+        return sendJson(res, { error: 'Cannot remove administrator account' }, 403);
+      }
+
+      db.prepare('DELETE FROM submissions WHERE student_id = ?').run(sid);
+      db.prepare('DELETE FROM student_progress WHERE student_id = ?').run(sid);
+      db.prepare('DELETE FROM users WHERE id = ?').run(sid);
+
+      return sendJson(res, {
+        success: true,
+        message: `Student "${target.full_name}" has been permanently removed.`
+      });
+    }
+
+    // ------------------------------------------------------------------------
     // API: Admin Get Submissions
     // ------------------------------------------------------------------------
     if (pathname === '/api/admin/submissions' && req.method === 'GET') {

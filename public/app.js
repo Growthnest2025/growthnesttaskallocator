@@ -1163,6 +1163,8 @@ const app = {
                 <span>🎓 ${this.escape(student.course_track || 'Frontend Development')}</span>
                 <span>&bull;</span>
                 <button type="button" class="btn btn-outline" style="padding:2px 8px; font-size:11px; height:auto; line-height:1.4; border-color:#cbd5e1; color:#334155;" onclick="app.promptResetPassword(${student.id}, '${this.escape(student.username)}')">🔑 Reset Password</button>
+                <span>&bull;</span>
+                <button type="button" class="btn btn-danger" style="padding:2px 8px; font-size:11px; height:auto; line-height:1.4; background:#fef2f2; border:1px solid #fecaca; color:#dc2626;" onclick="app.confirmRemoveStudent(${student.id}, '${this.escape(student.full_name)}')">🗑️ Remove Student</button>
               </div>
             </div>
           </div>
@@ -1633,6 +1635,36 @@ const app = {
     } catch (err) {
       this.showToast(err.message, 'error', 'Reset Failed');
     }
+  },
+
+  confirmRemoveStudent(studentId, studentName) {
+    this.showDialog({
+      type: 'confirm',
+      title: '⚠️ Remove Student Account?',
+      message: `Are you sure you want to permanently remove student <strong>"${this.escape(studentName)}"</strong>?<br><br><span style="color:#dc2626; font-size:12px;">This will permanently delete their account, all enrolled task records, and submitted code.</span>`,
+      confirmText: '🗑️ Yes, Delete Student',
+      cancelText: 'Cancel',
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`${API_BASE}/api/admin/students`, {
+            method: 'DELETE',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${this.token}`
+            },
+            body: JSON.stringify({ student_id: studentId })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Failed to remove student');
+
+          this.showToast(data.message || `Student ${studentName} removed successfully`, 'success', 'Student Removed');
+          this.selectedStudentId = null;
+          await this.loadAdminPortal();
+        } catch (err) {
+          this.showToast(err.message, 'error', 'Action Failed');
+        }
+      }
+    });
   },
 
   // --------------------------------------------------------------------------
