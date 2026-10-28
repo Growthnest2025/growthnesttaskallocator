@@ -610,8 +610,13 @@ const app = {
           <h3 class="workspace-heading">📝 Submit Assignment</h3>
 
           <div class="form-group" style="margin-bottom:12px;">
-            <label style="font-size:13px;">Source Code (HTML / CSS / JS):</label>
-            <textarea id="taskCodeInput" class="code-box" placeholder="Write or paste your complete code here...">${this.escape(sub ? (sub.code_html || sub.sample_code_text) : '')}</textarea>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+              <label style="font-size:13px; margin-bottom:0;">Source Code (HTML / CSS / JS):</label>
+              ${task.state === 'CHANGES_REQUESTED' && sub && sub.code_html ? `
+                <button type="button" class="btn btn-outline" style="font-size:11px; padding:2px 8px;" onclick="document.getElementById('taskCodeInput').value = decodeURIComponent('${encodeURIComponent(sub.code_html)}')">↺ Load Previous Code</button>
+              ` : ''}
+            </div>
+            <textarea id="taskCodeInput" class="code-box" placeholder="Write or paste your complete code here..."></textarea>
           </div>
 
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin-bottom:14px;">

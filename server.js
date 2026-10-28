@@ -62,7 +62,8 @@ function createMemoryDbFallback() {
     { id: 1, student_id: 2, current_task_id: 1, status: 'APPROVED', unlocked_at: '2026-10-12', completed_at: '2026-10-13' },
     { id: 2, student_id: 2, current_task_id: 2, status: 'IN_PROGRESS', unlocked_at: '2026-10-13', completed_at: null },
     { id: 3, student_id: 3, current_task_id: 1, status: 'IN_PROGRESS', unlocked_at: '2026-10-24', completed_at: null },
-    { id: 4, student_id: 4, current_task_id: 1, status: 'IN_PROGRESS', unlocked_at: '2026-10-27', completed_at: null }
+    { id: 4, student_id: 4, current_task_id: 1, status: 'IN_PROGRESS', unlocked_at: '2026-10-27', completed_at: null },
+    { id: 5, student_id: 5, current_task_id: 1, status: 'IN_PROGRESS', unlocked_at: '2026-10-27', completed_at: null }
   ];
 
   const submissions = [];
