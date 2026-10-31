@@ -243,6 +243,9 @@ if (DatabaseSync) {
       console.log('✓ SQLite Database initialized from schema.sql');
     }
     try { db.exec('ALTER TABLE users ADD COLUMN avatar_url TEXT;'); } catch (e) {}
+    try { db.exec('ALTER TABLE users ADD COLUMN course_duration TEXT;'); } catch (e) {}
+    try { db.exec('ALTER TABLE users ADD COLUMN monthly_fee REAL DEFAULT 0;'); } catch (e) {}
+    try { db.exec('ALTER TABLE users ADD COLUMN duration_months INTEGER DEFAULT 0;'); } catch (e) {}
   } catch (err) {
     console.warn('Could not initialize file SQLite DB, trying in-memory SQLite:', err.message);
     try {
@@ -251,6 +254,9 @@ if (DatabaseSync) {
         db.exec(fs.readFileSync(SCHEMA_FILE, 'utf8'));
       }
       try { db.exec('ALTER TABLE users ADD COLUMN avatar_url TEXT;'); } catch (e) {}
+    try { db.exec('ALTER TABLE users ADD COLUMN course_duration TEXT;'); } catch (e) {}
+    try { db.exec('ALTER TABLE users ADD COLUMN monthly_fee REAL DEFAULT 0;'); } catch (e) {}
+    try { db.exec('ALTER TABLE users ADD COLUMN duration_months INTEGER DEFAULT 0;'); } catch (e) {}
     } catch (e2) {
       db = createMemoryDbFallback();
     }
@@ -281,6 +287,74 @@ function getTodayIST() {
 function getTimeIST() {
   const d = new Date();
   return d.toLocaleTimeString('en-US', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
+}
+
+function ensureStudentInstallmentsSync(db, studentId) {
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(studentId);
+  if (!user || user.user_type === 'employee') return [];
+
+  const existing = db.prepare('SELECT * FROM student_fee_installments WHERE student_id = ? ORDER BY installment_number ASC').all(studentId) || [];
+
+  let durationType = user.course_duration || (user.user_type === 'intern' ? 'INTERNSHIP' : '6_MONTHS');
+  let durationMonths = Number(user.duration_months || 0);
+  let monthlyFee = Number(user.monthly_fee || 0);
+
+  if (!durationMonths || !monthlyFee) {
+    if (durationType === '3_MONTHS') {
+      durationMonths = 3;
+      monthlyFee = 2500;
+    } else if (durationType === '1_YEAR') {
+      durationMonths = 12;
+      monthlyFee = 1200;
+    } else if (durationType === 'INTERNSHIP') {
+      durationMonths = 3;
+      monthlyFee = 1000;
+    } else {
+      durationMonths = 6;
+      monthlyFee = 2500;
+    }
+  }
+
+  if (existing.length === durationMonths) {
+    return existing;
+  }
+
+  const joinDate = user.joining_date ? new Date(user.joining_date) : new Date();
+  let remainingPaid = Number(user.fees_paid || 0);
+
+  for (let i = 1; i <= durationMonths; i++) {
+    const d = new Date(joinDate);
+    d.setMonth(d.getMonth() + (i - 1));
+    const dueDateStr = d.toISOString().slice(0, 10);
+    const monthName = d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    const label = `Month ${i} (${monthName})`;
+
+    const existingInst = existing.find(e => e.installment_number === i);
+    if (!existingInst) {
+      let instStatus = 'DUE';
+      let paidAmt = 0;
+      if (remainingPaid >= monthlyFee) {
+        instStatus = 'VERIFIED';
+        paidAmt = monthlyFee;
+        remainingPaid -= monthlyFee;
+      } else if (remainingPaid > 0) {
+        instStatus = 'PARTIAL';
+        paidAmt = remainingPaid;
+        remainingPaid = 0;
+      }
+
+      try {
+        db.prepare(`
+          INSERT INTO student_fee_installments (
+            student_id, installment_number, month_label, due_date, amount_due, amount_paid, status, payment_date
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(student_id, installment_number) DO NOTHING
+        `).run(studentId, i, label, dueDateStr, monthlyFee, paidAmt, instStatus, instStatus === 'VERIFIED' ? dueDateStr : '');
+      } catch (e) {}
+    }
+  }
+
+  return db.prepare('SELECT * FROM student_fee_installments WHERE student_id = ? ORDER BY installment_number ASC').all(studentId) || [];
 }
 
 function sendJson(res, data, status = 200) {
@@ -329,6 +403,9 @@ function formatUserResponse(user) {
     fees_status: feesStatus,
     fees_due_date: user.fees_due_date || '',
     payment_notes: user.payment_notes || '',
+    course_duration: user.course_duration || (userType === 'intern' ? 'INTERNSHIP' : '6_MONTHS'),
+    monthly_fee: Number(user.monthly_fee || (userType === 'intern' ? 1000 : 2500)),
+    duration_months: Number(user.duration_months || (userType === 'intern' ? 3 : 6)),
     // Salary Details (for Staff / Employees)
     salary_amount: Number(user.salary_amount || 0),
     salary_status: user.salary_status || 'PENDING',
@@ -816,6 +893,137 @@ const requestHandler = async (req, res) => {
     }
 
     // ------------------------------------------------------------------------
+    // API: Student / Admin Get Fee Installments
+    // ------------------------------------------------------------------------
+    if (pathname === '/api/student/fee-installments' && req.method === 'GET') {
+      const studentId = parsedUrl.searchParams.get('student_id');
+      if (!studentId) return sendJson(res, { error: 'student_id is required' }, 400);
+
+      const installments = ensureStudentInstallmentsSync(db, Number(studentId));
+      const user = db.prepare('SELECT * FROM users WHERE id = ?').get(Number(studentId));
+
+      const today = getTodayIST();
+      const todayDay = Number(today.slice(8, 10));
+      const isMonthEnd = todayDay >= 25;
+
+      let hasOverdue = false;
+      let nextDue = null;
+
+      const updatedInstallments = installments.map(inst => {
+        let isOverdue = false;
+        if (inst.status !== 'VERIFIED' && inst.due_date <= today) {
+          isOverdue = true;
+          hasOverdue = true;
+        }
+        if (!nextDue && inst.status !== 'VERIFIED') {
+          nextDue = inst;
+        }
+        return {
+          ...inst,
+          is_overdue: isOverdue
+        };
+      });
+
+      let reminderMessage = '';
+      if (hasOverdue && nextDue) {
+        reminderMessage = `⚠️ Fee Due Reminder: ${nextDue.month_label} fee of ₹${Number(nextDue.amount_due).toLocaleString()} was due on ${nextDue.due_date}. Please complete payment and notify Admin.`;
+      } else if (isMonthEnd && nextDue) {
+        reminderMessage = `🔔 Month-End Fee Reminder: ${nextDue.month_label} fee of ₹${Number(nextDue.amount_due).toLocaleString()} is due on ${nextDue.due_date}. Please pay before the due date.`;
+      }
+
+      return sendJson(res, {
+        student_id: Number(studentId),
+        course_duration: user?.course_duration || '6_MONTHS',
+        monthly_fee: Number(user?.monthly_fee || 2500),
+        duration_months: Number(user?.duration_months || 6),
+        total_fees: Number(user?.total_fees || 0),
+        fees_paid: Number(user?.fees_paid || 0),
+        pending_fees: Math.max(0, Number(user?.total_fees || 0) - Number(user?.fees_paid || 0)),
+        fees_status: user?.fees_status || 'PENDING',
+        today_date: today,
+        is_month_end: isMonthEnd,
+        has_overdue: hasOverdue,
+        next_due_installment: nextDue,
+        reminder_message: reminderMessage,
+        installments: updatedInstallments
+      });
+    }
+
+    // ------------------------------------------------------------------------
+    // API: Student Submit Payment Reference
+    // ------------------------------------------------------------------------
+    if (pathname === '/api/student/submit-payment-ref' && req.method === 'POST') {
+      const authHeader = req.headers['authorization'];
+      if (!authHeader) return sendJson(res, { error: 'Unauthorized' }, 401);
+      const token = authHeader.replace('Bearer ', '');
+      let decoded;
+      try { decoded = JSON.parse(Buffer.from(token, 'base64').toString('utf8')); } catch(e) { return sendJson(res, { error: 'Invalid token' }, 401); }
+
+      const { installment_id, transaction_ref, payment_mode, notes } = await parseJsonBody(req);
+      if (!installment_id) return sendJson(res, { error: 'installment_id is required' }, 400);
+
+      const inst = db.prepare('SELECT * FROM student_fee_installments WHERE id = ? AND student_id = ?').get(installment_id, decoded.id);
+      if (!inst) return sendJson(res, { error: 'Installment not found' }, 404);
+
+      const today = getTodayIST();
+      db.prepare(`
+        UPDATE student_fee_installments
+        SET status = 'PENDING_VERIFICATION', transaction_ref = ?, payment_mode = ?, notes = ?, payment_date = ?
+        WHERE id = ?
+      `).run(transaction_ref || '', payment_mode || 'UPI', notes || '', today, installment_id);
+
+      return sendJson(res, {
+        success: true,
+        message: 'Payment reference submitted successfully! Admin will verify your installment shortly.'
+      });
+    }
+
+    // ------------------------------------------------------------------------
+    // API: Admin Verify Monthly Fee Installment
+    // ------------------------------------------------------------------------
+    if (pathname === '/api/admin/verify-installment' && req.method === 'POST') {
+      const { installment_id, status, payment_mode, transaction_ref, notes, admin_id } = await parseJsonBody(req);
+      if (!installment_id) return sendJson(res, { error: 'installment_id is required' }, 400);
+
+      const inst = db.prepare('SELECT * FROM student_fee_installments WHERE id = ?').get(installment_id);
+      if (!inst) return sendJson(res, { error: 'Installment record not found' }, 404);
+
+      const newStatus = status || 'VERIFIED';
+      const today = getTodayIST();
+      const newPaidAmt = newStatus === 'VERIFIED' ? inst.amount_due : (newStatus === 'DUE' ? 0 : inst.amount_paid);
+
+      db.prepare(`
+        UPDATE student_fee_installments
+        SET status = ?, amount_paid = ?, payment_mode = coalesce(?, payment_mode),
+            transaction_ref = coalesce(?, transaction_ref), notes = coalesce(?, notes),
+            verified_by = ?, verified_at = CURRENT_TIMESTAMP, payment_date = coalesce(payment_date, ?)
+        WHERE id = ?
+      `).run(newStatus, newPaidAmt, payment_mode || 'UPI', transaction_ref || '', notes || '', admin_id || 1, today, installment_id);
+
+      const sumResult = db.prepare("SELECT SUM(amount_paid) as total_verified FROM student_fee_installments WHERE student_id = ? AND status = 'VERIFIED'").get(inst.student_id);
+      const totalVerified = Number(sumResult?.total_verified || 0);
+
+      const user = db.prepare('SELECT total_fees FROM users WHERE id = ?').get(inst.student_id);
+      const totalFees = Number(user?.total_fees || 0);
+      let newFeeStatus = 'PENDING';
+      if (totalFees > 0) {
+        if (totalVerified >= totalFees) newFeeStatus = 'PAID';
+        else if (totalVerified > 0) newFeeStatus = 'PARTIAL';
+      }
+
+      db.prepare('UPDATE users SET fees_paid = ?, fees_status = ? WHERE id = ?').run(totalVerified, newFeeStatus, inst.student_id);
+      const updatedInst = db.prepare('SELECT * FROM student_fee_installments WHERE id = ?').get(installment_id);
+
+      return sendJson(res, {
+        success: true,
+        message: newStatus === 'VERIFIED' ? `Installment ${inst.month_label} verified successfully!` : `Installment status updated to ${newStatus}`,
+        installment: updatedInst,
+        total_fees_paid: totalVerified,
+        fees_status: newFeeStatus
+      });
+    }
+
+    // ------------------------------------------------------------------------
     // API: Admin KPI Stats (Real Database Counts)
     // ------------------------------------------------------------------------
     if (pathname === '/api/admin/stats' && req.method === 'GET') {
@@ -1011,7 +1219,10 @@ const requestHandler = async (req, res) => {
         salary_status,
         salary_date,
         payment_mode,
-        salary_notes
+        salary_notes,
+        course_duration,
+        monthly_fee,
+        duration_months
       } = body;
 
       if (!username || !password || !full_name || !joining_date) {
@@ -1022,7 +1233,27 @@ const requestHandler = async (req, res) => {
       const assignedType = user_type || 'student';
       const track = course_track || (assignedType === 'intern' ? 'Frontend Engineering Internship' : 'Frontend Web Development (HTML/CSS/JS)');
 
-      const tFees = Number(total_fees || 0);
+      const cDuration = course_duration || (assignedType === 'intern' ? 'INTERNSHIP' : '6_MONTHS');
+      let mFee = Number(monthly_fee || 0);
+      let dMonths = Number(duration_months || 0);
+
+      if (!dMonths || !mFee) {
+        if (cDuration === '3_MONTHS') {
+          dMonths = 3;
+          mFee = 2500;
+        } else if (cDuration === '1_YEAR') {
+          dMonths = 12;
+          mFee = 1200;
+        } else if (cDuration === 'INTERNSHIP') {
+          dMonths = 3;
+          mFee = 1000;
+        } else {
+          dMonths = 6;
+          mFee = 2500;
+        }
+      }
+
+      const tFees = Number(total_fees || (dMonths * mFee));
       const pFees = Number(fees_paid || 0);
       let fStatus = fees_status;
       if (!fStatus) {
@@ -1040,8 +1271,9 @@ const requestHandler = async (req, res) => {
           INSERT INTO users (
             username, password_hash, role, user_type, full_name, email, phone, joining_date, course_track,
             designation, department, total_fees, fees_paid, fees_status, fees_due_date, payment_notes,
-            salary_amount, salary_status, salary_date, payment_mode, salary_notes
-          ) VALUES (?, ?, 'student', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            salary_amount, salary_status, salary_date, payment_mode, salary_notes,
+            course_duration, monthly_fee, duration_months
+          ) VALUES (?, ?, 'student', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         const result = stmt.run(
           username,
@@ -1063,13 +1295,17 @@ const requestHandler = async (req, res) => {
           sStatus,
           salary_date || '',
           payment_mode || 'Bank Transfer',
-          salary_notes || ''
+          salary_notes || '',
+          cDuration,
+          mFee,
+          dMonths
         );
         const memberId = Number(result.lastInsertRowid);
 
         if (assignedType !== 'employee') {
           const progStmt = db.prepare(`INSERT INTO student_progress (student_id, current_task_id, status) VALUES (?, 1, 'IN_PROGRESS')`);
           progStmt.run(memberId);
+          ensureStudentInstallmentsSync(db, memberId);
         }
 
         const label = assignedType === 'intern' ? 'Intern' : (assignedType === 'employee' ? 'Employee / Staff' : 'Student');
@@ -1083,9 +1319,21 @@ const requestHandler = async (req, res) => {
     // API: Admin Update Student / Intern Fees
     // ------------------------------------------------------------------------
     if (pathname === '/api/admin/update-fees' && req.method === 'POST') {
-      const { student_id, total_fees, fees_paid, fees_status, fees_due_date, payment_notes } = await parseJsonBody(req);
+      const body = await parseJsonBody(req);
+      const {
+        student_id,
+        total_fees,
+        fees_paid,
+        fees_status,
+        fees_due_date,
+        payment_notes,
+        course_duration,
+        monthly_fee,
+        duration_months
+      } = body;
       if (!student_id) return sendJson(res, { error: 'student_id is required' }, 400);
 
+      const sid = Number(student_id);
       const tFees = Number(total_fees || 0);
       const pFees = Number(fees_paid || 0);
       let status = fees_status;
@@ -1098,9 +1346,24 @@ const requestHandler = async (req, res) => {
 
       db.prepare(`
         UPDATE users 
-        SET total_fees = ?, fees_paid = ?, fees_status = ?, fees_due_date = ?, payment_notes = ?
+        SET total_fees = ?, fees_paid = ?, fees_status = ?, fees_due_date = ?, payment_notes = ?,
+            course_duration = coalesce(?, course_duration),
+            monthly_fee = coalesce(?, monthly_fee),
+            duration_months = coalesce(?, duration_months)
         WHERE id = ?
-      `).run(tFees, pFees, status, fees_due_date || '', payment_notes || '', Number(student_id));
+      `).run(
+        tFees,
+        pFees,
+        status,
+        fees_due_date || '',
+        payment_notes || '',
+        course_duration || null,
+        monthly_fee ? Number(monthly_fee) : null,
+        duration_months ? Number(duration_months) : null,
+        sid
+      );
+
+      ensureStudentInstallmentsSync(db, sid);
 
       return sendJson(res, {
         success: true,
@@ -1111,7 +1374,10 @@ const requestHandler = async (req, res) => {
           pending_fees: Math.max(0, tFees - pFees),
           fees_status: status,
           fees_due_date: fees_due_date || '',
-          payment_notes: payment_notes || ''
+          payment_notes: payment_notes || '',
+          course_duration,
+          monthly_fee,
+          duration_months
         }
       });
     }

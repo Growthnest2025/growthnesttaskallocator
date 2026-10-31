@@ -31,6 +31,79 @@ function getTimeIST() {
   return d.toLocaleTimeString("en-US", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true });
 }
 
+async function ensureStudentInstallments(db, studentId) {
+  const user = await db.prepare("SELECT * FROM users WHERE id = ?").bind(studentId).first();
+  if (!user || user.user_type === "employee") return [];
+
+  const existingResult = await db
+    .prepare("SELECT * FROM student_fee_installments WHERE student_id = ? ORDER BY installment_number ASC")
+    .bind(studentId)
+    .all();
+  const existing = existingResult.results || [];
+
+  let durationType = user.course_duration || (user.user_type === "intern" ? "INTERNSHIP" : "6_MONTHS");
+  let durationMonths = Number(user.duration_months || 0);
+  let monthlyFee = Number(user.monthly_fee || 0);
+
+  if (!durationMonths || !monthlyFee) {
+    if (durationType === "3_MONTHS") {
+      durationMonths = 3;
+      monthlyFee = 2500;
+    } else if (durationType === "1_YEAR") {
+      durationMonths = 12;
+      monthlyFee = 1200;
+    } else if (durationType === "INTERNSHIP") {
+      durationMonths = 3;
+      monthlyFee = 1000;
+    } else {
+      durationMonths = 6;
+      monthlyFee = 2500;
+    }
+  }
+
+  const joinDate = user.joining_date ? new Date(user.joining_date) : new Date();
+  let remainingPaid = Number(user.fees_paid || 0);
+
+  for (let i = 1; i <= durationMonths; i++) {
+    const d = new Date(joinDate);
+    d.setMonth(d.getMonth() + (i - 1));
+    const dueDateStr = d.toISOString().slice(0, 10);
+    const monthName = d.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+    const label = `Month ${i} (${monthName})`;
+
+    const existingInst = existing.find(e => e.installment_number === i);
+    if (!existingInst) {
+      let instStatus = "DUE";
+      let paidAmt = 0;
+      if (remainingPaid >= monthlyFee) {
+        instStatus = "VERIFIED";
+        paidAmt = monthlyFee;
+        remainingPaid -= monthlyFee;
+      } else if (remainingPaid > 0) {
+        instStatus = "PARTIAL";
+        paidAmt = remainingPaid;
+        remainingPaid = 0;
+      }
+
+      await db
+        .prepare(
+          `INSERT INTO student_fee_installments (
+            student_id, installment_number, month_label, due_date, amount_due, amount_paid, status, payment_date
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(student_id, installment_number) DO NOTHING`
+        )
+        .bind(studentId, i, label, dueDateStr, monthlyFee, paidAmt, instStatus, instStatus === "VERIFIED" ? dueDateStr : "")
+        .run();
+    }
+  }
+
+  const finalResult = await db
+    .prepare("SELECT * FROM student_fee_installments WHERE student_id = ? ORDER BY installment_number ASC")
+    .bind(studentId)
+    .all();
+  return finalResult.results || [];
+}
+
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -79,6 +152,9 @@ function formatUserResponse(user) {
     fees_status: feesStatus,
     fees_due_date: user.fees_due_date || "",
     payment_notes: user.payment_notes || "",
+    course_duration: user.course_duration || (userType === "intern" ? "INTERNSHIP" : "6_MONTHS"),
+    monthly_fee: Number(user.monthly_fee || (userType === "intern" ? 1000 : 2500)),
+    duration_months: Number(user.duration_months || (userType === "intern" ? 3 : 6)),
     // Salary Details (for Staff / Employees)
     salary_amount: Number(user.salary_amount || 0),
     salary_status: user.salary_status || "PENDING",
@@ -444,6 +520,152 @@ export default {
       }
 
       // ----------------------------------------------------------------------
+      // STUDENT / ADMIN: Get Monthly Fee Installments & Due Reminders
+      // ----------------------------------------------------------------------
+      if (url.pathname === "/api/student/fee-installments" && request.method === "GET") {
+        const studentId = url.searchParams.get("student_id");
+        if (!studentId) return jsonResponse({ error: "student_id is required" }, 400);
+
+        const installments = await ensureStudentInstallments(db, Number(studentId));
+        const user = await db.prepare("SELECT * FROM users WHERE id = ?").bind(Number(studentId)).first();
+
+        const today = getTodayIST();
+        const todayDay = Number(today.slice(8, 10));
+        const isMonthEnd = todayDay >= 25;
+
+        let hasOverdue = false;
+        let nextDue = null;
+
+        const updatedInstallments = installments.map(inst => {
+          let isOverdue = false;
+          if (inst.status !== "VERIFIED" && inst.due_date <= today) {
+            isOverdue = true;
+            hasOverdue = true;
+          }
+          if (!nextDue && inst.status !== "VERIFIED") {
+            nextDue = inst;
+          }
+          return {
+            ...inst,
+            is_overdue: isOverdue
+          };
+        });
+
+        let reminderMessage = "";
+        if (hasOverdue && nextDue) {
+          reminderMessage = `⚠️ Fee Due Reminder: ${nextDue.month_label} fee of ₹${Number(nextDue.amount_due).toLocaleString()} was due on ${nextDue.due_date}. Please complete payment and notify Admin.`;
+        } else if (isMonthEnd && nextDue) {
+          reminderMessage = `🔔 Month-End Fee Reminder: ${nextDue.month_label} fee of ₹${Number(nextDue.amount_due).toLocaleString()} is due on ${nextDue.due_date}. Please pay before the due date.`;
+        }
+
+        return jsonResponse({
+          student_id: Number(studentId),
+          course_duration: user?.course_duration || "6_MONTHS",
+          monthly_fee: Number(user?.monthly_fee || 2500),
+          duration_months: Number(user?.duration_months || 6),
+          total_fees: Number(user?.total_fees || 0),
+          fees_paid: Number(user?.fees_paid || 0),
+          pending_fees: Math.max(0, Number(user?.total_fees || 0) - Number(user?.fees_paid || 0)),
+          fees_status: user?.fees_status || "PENDING",
+          today_date: today,
+          is_month_end: isMonthEnd,
+          has_overdue: hasOverdue,
+          next_due_installment: nextDue,
+          reminder_message: reminderMessage,
+          installments: updatedInstallments
+        });
+      }
+
+      // ----------------------------------------------------------------------
+      // STUDENT: Submit Payment Reference for Monthly Installment
+      // ----------------------------------------------------------------------
+      if (url.pathname === "/api/student/submit-payment-ref" && request.method === "POST") {
+        const authHeader = request.headers.get("Authorization");
+        if (!authHeader) return jsonResponse({ error: "Unauthorized" }, 401);
+        const token = authHeader.replace("Bearer ", "");
+        const decoded = JSON.parse(atob(token));
+
+        const body = await request.json();
+        const { installment_id, transaction_ref, payment_mode, notes } = body;
+        if (!installment_id) return jsonResponse({ error: "installment_id is required" }, 400);
+
+        const inst = await db.prepare("SELECT * FROM student_fee_installments WHERE id = ? AND student_id = ?").bind(installment_id, decoded.id).first();
+        if (!inst) return jsonResponse({ error: "Installment not found" }, 404);
+
+        const today = getTodayIST();
+        await db
+          .prepare(
+            `UPDATE student_fee_installments
+             SET status = 'PENDING_VERIFICATION', transaction_ref = ?, payment_mode = ?, notes = ?, payment_date = ?
+             WHERE id = ?`
+          )
+          .bind(transaction_ref || "", payment_mode || "UPI", notes || "", today, installment_id)
+          .run();
+
+        return jsonResponse({
+          success: true,
+          message: "Payment reference submitted successfully! Admin will verify your installment shortly."
+        });
+      }
+
+      // ----------------------------------------------------------------------
+      // ADMIN: Verify Monthly Fee Installment
+      // ----------------------------------------------------------------------
+      if (url.pathname === "/api/admin/verify-installment" && request.method === "POST") {
+        const body = await request.json();
+        const { installment_id, status, payment_mode, transaction_ref, notes, admin_id } = body;
+        if (!installment_id) return jsonResponse({ error: "installment_id is required" }, 400);
+
+        const inst = await db.prepare("SELECT * FROM student_fee_installments WHERE id = ?").bind(installment_id).first();
+        if (!inst) return jsonResponse({ error: "Installment record not found" }, 404);
+
+        const newStatus = status || "VERIFIED";
+        const today = getTodayIST();
+        const newPaidAmt = newStatus === "VERIFIED" ? inst.amount_due : (newStatus === "DUE" ? 0 : inst.amount_paid);
+
+        await db
+          .prepare(
+            `UPDATE student_fee_installments
+             SET status = ?, amount_paid = ?, payment_mode = coalesce(?, payment_mode),
+                 transaction_ref = coalesce(?, transaction_ref), notes = coalesce(?, notes),
+                 verified_by = ?, verified_at = CURRENT_TIMESTAMP, payment_date = coalesce(payment_date, ?)
+             WHERE id = ?`
+          )
+          .bind(newStatus, newPaidAmt, payment_mode || "UPI", transaction_ref || "", notes || "", admin_id || 1, today, installment_id)
+          .run();
+
+        // Re-calculate total verified fees for this student
+        const sumResult = await db
+          .prepare("SELECT SUM(amount_paid) as total_verified FROM student_fee_installments WHERE student_id = ? AND status = 'VERIFIED'")
+          .bind(inst.student_id)
+          .first();
+        const totalVerified = Number(sumResult?.total_verified || 0);
+
+        const user = await db.prepare("SELECT total_fees FROM users WHERE id = ?").bind(inst.student_id).first();
+        const totalFees = Number(user?.total_fees || 0);
+        let newFeeStatus = "PENDING";
+        if (totalFees > 0) {
+          if (totalVerified >= totalFees) newFeeStatus = "PAID";
+          else if (totalVerified > 0) newFeeStatus = "PARTIAL";
+        }
+
+        await db
+          .prepare("UPDATE users SET fees_paid = ?, fees_status = ? WHERE id = ?")
+          .bind(totalVerified, newFeeStatus, inst.student_id)
+          .run();
+
+        const updatedInst = await db.prepare("SELECT * FROM student_fee_installments WHERE id = ?").bind(installment_id).first();
+
+        return jsonResponse({
+          success: true,
+          message: newStatus === "VERIFIED" ? `Installment ${inst.month_label} verified successfully!` : `Installment status updated to ${newStatus}`,
+          installment: updatedInst,
+          total_fees_paid: totalVerified,
+          fees_status: newFeeStatus
+        });
+      }
+
+      // ----------------------------------------------------------------------
       // ADMIN: KPI Stats (Real Database Counts)
       // ----------------------------------------------------------------------
       if (url.pathname === "/api/admin/stats" && request.method === "GET") {
@@ -654,6 +876,9 @@ export default {
           course_track,
           designation,
           department,
+          course_duration,
+          monthly_fee,
+          duration_months,
           total_fees,
           fees_paid,
           fees_status,
@@ -674,7 +899,27 @@ export default {
         const assignedType = user_type || "student";
         const track = course_track || (assignedType === "intern" ? "Frontend Engineering Internship" : "Frontend Web Development (HTML/CSS/JS)");
 
-        const tFees = Number(total_fees || 0);
+        let cDuration = course_duration || (assignedType === "intern" ? "INTERNSHIP" : "6_MONTHS");
+        let mFee = Number(monthly_fee || 0);
+        let dMonths = Number(duration_months || 0);
+
+        if (!dMonths || !mFee) {
+          if (cDuration === "3_MONTHS") {
+            dMonths = 3;
+            mFee = 2500;
+          } else if (cDuration === "1_YEAR") {
+            dMonths = 12;
+            mFee = 1200;
+          } else if (cDuration === "INTERNSHIP") {
+            dMonths = 3;
+            mFee = 1000;
+          } else {
+            dMonths = 6;
+            mFee = 2500;
+          }
+        }
+
+        const tFees = Number(total_fees || (dMonths * mFee));
         const pFees = Number(fees_paid || 0);
         let fStatus = fees_status;
         if (!fStatus) {
@@ -693,8 +938,9 @@ export default {
               `INSERT INTO users (
                 username, password_hash, role, user_type, full_name, email, phone, joining_date, course_track,
                 designation, department, total_fees, fees_paid, fees_status, fees_due_date, payment_notes,
-                salary_amount, salary_status, salary_date, payment_mode, salary_notes
-              ) VALUES (?, ?, 'student', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+                salary_amount, salary_status, salary_date, payment_mode, salary_notes,
+                course_duration, monthly_fee, duration_months
+              ) VALUES (?, ?, 'student', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             )
             .bind(
               username,
@@ -716,18 +962,22 @@ export default {
               sStatus,
               salary_date || "",
               payment_mode || "Bank Transfer",
-              salary_notes || ""
+              salary_notes || "",
+              cDuration,
+              mFee,
+              dMonths
             )
             .run();
 
           const newMemberId = res.meta.last_row_id;
 
-          // If student or intern, unlock first task (Task 1: HTML)
+          // If student or intern, unlock first task (Task 1: HTML) & initialize monthly installments
           if (assignedType !== "employee") {
             await db
               .prepare("INSERT INTO student_progress (student_id, current_task_id, status) VALUES (?, 1, 'IN_PROGRESS')")
               .bind(newMemberId)
               .run();
+            await ensureStudentInstallments(db, newMemberId);
           }
 
           const label = assignedType === "intern" ? "Intern" : (assignedType === "employee" ? "Employee / Staff" : "Student");
@@ -745,9 +995,21 @@ export default {
       // ADMIN: Update Student / Intern Fees
       // ----------------------------------------------------------------------
       if (url.pathname === "/api/admin/update-fees" && request.method === "POST") {
-        const { student_id, total_fees, fees_paid, fees_status, fees_due_date, payment_notes } = await request.json();
+        const body = await request.json();
+        const {
+          student_id,
+          total_fees,
+          fees_paid,
+          fees_status,
+          fees_due_date,
+          payment_notes,
+          course_duration,
+          monthly_fee,
+          duration_months
+        } = body;
         if (!student_id) return jsonResponse({ error: "student_id is required" }, 400);
 
+        const sid = Number(student_id);
         const tFees = Number(total_fees || 0);
         const pFees = Number(fees_paid || 0);
         let status = fees_status;
@@ -761,11 +1023,26 @@ export default {
         await db
           .prepare(
             `UPDATE users 
-             SET total_fees = ?, fees_paid = ?, fees_status = ?, fees_due_date = ?, payment_notes = ?
+             SET total_fees = ?, fees_paid = ?, fees_status = ?, fees_due_date = ?, payment_notes = ?,
+                 course_duration = coalesce(?, course_duration),
+                 monthly_fee = coalesce(?, monthly_fee),
+                 duration_months = coalesce(?, duration_months)
              WHERE id = ?`
           )
-          .bind(tFees, pFees, status, fees_due_date || "", payment_notes || "", Number(student_id))
+          .bind(
+            tFees,
+            pFees,
+            status,
+            fees_due_date || "",
+            payment_notes || "",
+            course_duration || null,
+            monthly_fee ? Number(monthly_fee) : null,
+            duration_months ? Number(duration_months) : null,
+            sid
+          )
           .run();
+
+        await ensureStudentInstallments(db, sid);
 
         return jsonResponse({
           success: true,
@@ -776,7 +1053,10 @@ export default {
             pending_fees: Math.max(0, tFees - pFees),
             fees_status: status,
             fees_due_date: fees_due_date || "",
-            payment_notes: payment_notes || ""
+            payment_notes: payment_notes || "",
+            course_duration,
+            monthly_fee,
+            duration_months
           }
         });
       }

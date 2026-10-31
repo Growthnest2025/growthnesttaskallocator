@@ -734,11 +734,30 @@ const app = {
     main.innerHTML = `<p style="text-align:center; padding:40px; color:var(--text-muted);">Loading your curriculum & tasks...</p>`;
 
     try {
-      const res = await fetch(`${API_BASE}/api/student/roadmap?student_id=${this.currentUser.id}`, {
-        headers: { 'Authorization': `Bearer ${this.token}` }
-      });
-      if (!res.ok) throw new Error('Failed to load student roadmap');
-      const data = await res.json();
+      const [roadmapRes, feeRes] = await Promise.all([
+        fetch(`${API_BASE}/api/student/roadmap?student_id=${this.currentUser.id}`, {
+          headers: { 'Authorization': `Bearer ${this.token}` }
+        }),
+        fetch(`${API_BASE}/api/student/fee-installments?student_id=${this.currentUser.id}`, {
+          headers: { 'Authorization': `Bearer ${this.token}` }
+        })
+      ]);
+
+      if (!roadmapRes.ok) throw new Error('Failed to load student roadmap');
+      const data = await roadmapRes.json();
+
+      if (feeRes.ok) {
+        this.studentFeeData = await feeRes.json();
+        if (this.studentFeeData) {
+          this.currentUser.total_fees = this.studentFeeData.total_fees;
+          this.currentUser.fees_paid = this.studentFeeData.fees_paid;
+          this.currentUser.pending_fees = this.studentFeeData.pending_fees;
+          this.currentUser.fees_status = this.studentFeeData.fees_status;
+          this.currentUser.course_duration = this.studentFeeData.course_duration;
+          this.currentUser.monthly_fee = this.studentFeeData.monthly_fee;
+          this.currentUser.duration_months = this.studentFeeData.duration_months;
+        }
+      }
 
       this.roadmap = data.roadmap || [];
 
@@ -796,6 +815,28 @@ const app = {
         </div>
       </div>
 
+      <!-- Month-End / Overdue Fee Reminder Banner -->
+      ${this.studentFeeData && this.studentFeeData.reminder_message ? `
+        <div style="background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border: 1.5px solid #f59e0b; border-radius: 12px; padding: 14px 18px; margin-bottom: 16px; box-shadow: 0 2px 8px rgba(245, 158, 11, 0.15); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="font-size: 28px;">🔔</div>
+            <div>
+              <div style="font-weight: 800; font-size: 14.5px; color: #92400e;">
+                Monthly Fee Due Reminder
+              </div>
+              <div style="font-size: 13px; color: #78350f; margin-top: 2px;">
+                ${this.escape(this.studentFeeData.reminder_message)}
+              </div>
+            </div>
+          </div>
+          ${this.studentFeeData.next_due_installment ? `
+            <button class="btn btn-primary btn-sm" onclick="app.openSubmitPaymentModal(${this.studentFeeData.next_due_installment.id}, '${this.escape(this.studentFeeData.next_due_installment.month_label)}', ${this.studentFeeData.next_due_installment.amount_due})">
+              💳 Pay & Submit Reference
+            </button>
+          ` : ''}
+        </div>
+      ` : ''}
+
       <!-- Student's Own Fees Status Card -->
       <div class="fees-summary-card accent-emerald" style="margin-bottom:16px;">
         <div class="summary-card-header">
@@ -843,6 +884,9 @@ const app = {
             <strong>Payment Info:</strong> <span>${this.escape(u.payment_notes)}</span>
           </div>
         ` : ''}
+
+        <!-- Monthly Installment Schedule for Student -->
+        ${this.renderStudentInstallmentsSchedule()}
       </div>
 
       <!-- Progressive 23-Task Stepper Strip -->
@@ -1279,11 +1323,31 @@ const app = {
 
   async fetchStudentPortfolio(studentId) {
     try {
-      const res = await fetch(`${API_BASE}/api/admin/student-portfolio?student_id=${studentId}`, {
-        headers: { 'Authorization': `Bearer ${this.token}` }
-      });
-      if (res.ok) {
-        this.selectedStudentPortfolio = await res.json();
+      const [portRes, feeRes] = await Promise.all([
+        fetch(`${API_BASE}/api/admin/student-portfolio?student_id=${studentId}`, {
+          headers: { 'Authorization': `Bearer ${this.token}` }
+        }),
+        fetch(`${API_BASE}/api/student/fee-installments?student_id=${studentId}`, {
+          headers: { 'Authorization': `Bearer ${this.token}` }
+        })
+      ]);
+
+      if (portRes.ok) {
+        this.selectedStudentPortfolio = await portRes.json();
+        if (feeRes.ok) {
+          const feeData = await feeRes.json();
+          this.selectedStudentPortfolio.fee_installments = feeData.installments || [];
+          this.selectedStudentPortfolio.fee_summary = feeData;
+          if (this.selectedStudentPortfolio.student) {
+            this.selectedStudentPortfolio.student.course_duration = feeData.course_duration;
+            this.selectedStudentPortfolio.student.monthly_fee = feeData.monthly_fee;
+            this.selectedStudentPortfolio.student.duration_months = feeData.duration_months;
+            this.selectedStudentPortfolio.student.total_fees = feeData.total_fees;
+            this.selectedStudentPortfolio.student.fees_paid = feeData.fees_paid;
+            this.selectedStudentPortfolio.student.pending_fees = feeData.pending_fees;
+            this.selectedStudentPortfolio.student.fees_status = feeData.fees_status;
+          }
+        }
         if (this.selectedStudentPortfolio && this.selectedStudentPortfolio.student && this.selectedStudentPortfolio.student.user_type === 'employee') {
           await this.fetchStaffAttendanceHistory(studentId);
         }
@@ -2496,6 +2560,9 @@ const app = {
         ` : ''}
       </div>
 
+      <!-- Monthly Fee Installments Verification Ledger -->
+      ${this.renderAdminInstallmentsLedger(student)}
+
       <!-- ACTIVE SUBMISSION AWAITING REVIEW (If student has a pending task) -->
       ${pending_submission ? `
         <div id="pendingReviewBox" class="review-hero-card review-pulse-focus">
@@ -2866,6 +2933,106 @@ const app = {
     }
   },
 
+  handleCoursePlanChange() {
+    const plan = document.getElementById('addCourseDuration').value;
+    const mFeeEl = document.getElementById('addMonthlyFee');
+    const dMonthsEl = document.getElementById('addDurationMonths');
+    const totalEl = document.getElementById('addStudentTotalFees');
+
+    if (plan === '3_MONTHS') {
+      if (mFeeEl) mFeeEl.value = 2500;
+      if (dMonthsEl) dMonthsEl.value = 3;
+      if (totalEl) totalEl.value = 7500;
+    } else if (plan === '6_MONTHS') {
+      if (mFeeEl) mFeeEl.value = 2500;
+      if (dMonthsEl) dMonthsEl.value = 6;
+      if (totalEl) totalEl.value = 15000;
+    } else if (plan === '1_YEAR') {
+      if (mFeeEl) mFeeEl.value = 1200;
+      if (dMonthsEl) dMonthsEl.value = 12;
+      if (totalEl) totalEl.value = 14400;
+    }
+    this.calcAddStudentBalance();
+  },
+
+  calcAddStudentMonthlyTotal() {
+    const mFee = Number(document.getElementById('addMonthlyFee')?.value || 0);
+    const dMonths = Number(document.getElementById('addDurationMonths')?.value || 0);
+    const totalEl = document.getElementById('addStudentTotalFees');
+    if (totalEl && mFee && dMonths) {
+      totalEl.value = mFee * dMonths;
+    }
+    this.calcAddStudentBalance();
+  },
+
+  handleInternPlanChange() {
+    const plan = document.getElementById('addInternDuration').value;
+    const mFeeEl = document.getElementById('addInternMonthlyFee');
+    const dMonthsEl = document.getElementById('addInternDurationMonths');
+    const totalEl = document.getElementById('addInternTotalFees');
+
+    if (plan === 'INTERNSHIP_3') {
+      if (mFeeEl) mFeeEl.value = 1000;
+      if (dMonthsEl) dMonthsEl.value = 3;
+      if (totalEl) totalEl.value = 3000;
+    } else if (plan === 'INTERNSHIP_6') {
+      if (mFeeEl) mFeeEl.value = 1000;
+      if (dMonthsEl) dMonthsEl.value = 6;
+      if (totalEl) totalEl.value = 6000;
+    } else if (plan === 'INTERNSHIP_1') {
+      if (mFeeEl) mFeeEl.value = 1000;
+      if (dMonthsEl) dMonthsEl.value = 1;
+      if (totalEl) totalEl.value = 1000;
+    }
+    this.calcAddInternBalance();
+  },
+
+  calcAddInternMonthlyTotal() {
+    const mFee = Number(document.getElementById('addInternMonthlyFee')?.value || 0);
+    const dMonths = Number(document.getElementById('addInternDurationMonths')?.value || 0);
+    const totalEl = document.getElementById('addInternTotalFees');
+    if (totalEl && mFee && dMonths) {
+      totalEl.value = mFee * dMonths;
+    }
+    this.calcAddInternBalance();
+  },
+
+  handleEditCoursePlanChange() {
+    const plan = document.getElementById('editCourseDuration').value;
+    const mFeeEl = document.getElementById('editMonthlyFee');
+    const dMonthsEl = document.getElementById('editDurationMonths');
+    const totalEl = document.getElementById('editFeeTotal');
+
+    if (plan === '3_MONTHS') {
+      if (mFeeEl) mFeeEl.value = 2500;
+      if (dMonthsEl) dMonthsEl.value = 3;
+      if (totalEl) totalEl.value = 7500;
+    } else if (plan === '6_MONTHS') {
+      if (mFeeEl) mFeeEl.value = 2500;
+      if (dMonthsEl) dMonthsEl.value = 6;
+      if (totalEl) totalEl.value = 15000;
+    } else if (plan === '1_YEAR') {
+      if (mFeeEl) mFeeEl.value = 1200;
+      if (dMonthsEl) dMonthsEl.value = 12;
+      if (totalEl) totalEl.value = 14400;
+    } else if (plan === 'INTERNSHIP') {
+      if (mFeeEl) mFeeEl.value = 1000;
+      if (dMonthsEl) dMonthsEl.value = 3;
+      if (totalEl) totalEl.value = 3000;
+    }
+    this.calcEditFeeBalance();
+  },
+
+  calcEditMonthlyTotal() {
+    const mFee = Number(document.getElementById('editMonthlyFee')?.value || 0);
+    const dMonths = Number(document.getElementById('editDurationMonths')?.value || 0);
+    const totalEl = document.getElementById('editFeeTotal');
+    if (totalEl && mFee && dMonths) {
+      totalEl.value = mFee * dMonths;
+    }
+    this.calcEditFeeBalance();
+  },
+
   calcAddStudentBalance() {
     const total = Number(document.getElementById('addStudentTotalFees').value || 0);
     const paid = Number(document.getElementById('addStudentPaidFees').value || 0);
@@ -2912,7 +3079,28 @@ const app = {
 
     document.getElementById('editFeeStudentId').value = target.id;
     document.getElementById('updateFeesTargetName').innerText = `${target.full_name} (@${target.username})`;
-    document.getElementById('editFeeTotal').value = target.total_fees || 0;
+
+    const isIntern = target.user_type === 'intern';
+    const courseDuration = target.course_duration || (isIntern ? 'INTERNSHIP' : '6_MONTHS');
+    const monthlyFee = Number(target.monthly_fee || (isIntern ? 1000 : (courseDuration === '1_YEAR' ? 1200 : 2500)));
+    let durMonths = Number(target.duration_months || 0);
+    if (!durMonths) {
+      if (courseDuration === '3_MONTHS') durMonths = 3;
+      else if (courseDuration === '1_YEAR') durMonths = 12;
+      else if (courseDuration === 'INTERNSHIP') durMonths = 3;
+      else durMonths = 6;
+    }
+
+    const durSelect = document.getElementById('editCourseDuration');
+    if (durSelect) durSelect.value = courseDuration;
+
+    const mFeeEl = document.getElementById('editMonthlyFee');
+    if (mFeeEl) mFeeEl.value = monthlyFee;
+
+    const dMonthsEl = document.getElementById('editDurationMonths');
+    if (dMonthsEl) dMonthsEl.value = durMonths;
+
+    document.getElementById('editFeeTotal').value = target.total_fees || (monthlyFee * durMonths);
     document.getElementById('editFeePaid').value = target.fees_paid || 0;
     document.getElementById('editFeeStatus').value = target.fees_status || 'PENDING';
     document.getElementById('editFeeDueDate').value = target.fees_due_date || '';
@@ -2930,6 +3118,9 @@ const app = {
     const fees_status = document.getElementById('editFeeStatus').value;
     const fees_due_date = document.getElementById('editFeeDueDate').value;
     const payment_notes = document.getElementById('editFeeNotes').value.trim();
+    const course_duration = document.getElementById('editCourseDuration') ? document.getElementById('editCourseDuration').value : '6_MONTHS';
+    const monthly_fee = document.getElementById('editMonthlyFee') ? Number(document.getElementById('editMonthlyFee').value || 0) : 0;
+    const duration_months = document.getElementById('editDurationMonths') ? Number(document.getElementById('editDurationMonths').value || 0) : 0;
 
     try {
       const res = await fetch(`${API_BASE}/api/admin/update-fees`, {
@@ -2944,7 +3135,10 @@ const app = {
           fees_paid,
           fees_status,
           fees_due_date,
-          payment_notes
+          payment_notes,
+          course_duration,
+          monthly_fee,
+          duration_months
         })
       });
       const data = await res.json();
@@ -2960,6 +3154,333 @@ const app = {
     } catch (err) {
       this.showToast(err.message, 'error', 'Update Failed');
     }
+  },
+
+  renderAdminInstallmentsLedger(student) {
+    const installments = (this.selectedStudentPortfolio && this.selectedStudentPortfolio.fee_installments) || [];
+    const planName = student.course_duration === '3_MONTHS' ? '3 Months Course (₹2,500/mo)'
+      : (student.course_duration === '1_YEAR' ? '1 Year Course (₹1,200/mo)'
+      : (student.course_duration === 'INTERNSHIP' || student.user_type === 'intern' ? 'Internship (₹1,000/mo)'
+      : '6 Months Course (₹2,500/mo)'));
+
+    return `
+      <div class="card" style="margin-top:16px; margin-bottom:16px; padding:18px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; flex-wrap:wrap; gap:8px;">
+          <div>
+            <h4 style="font-size:15px; font-weight:800; color:var(--dark-navy); display:flex; align-items:center; gap:8px;">
+              <span>📅</span> Monthly Fee Installments Verification Ledger
+            </h4>
+            <div style="font-size:12.5px; color:var(--text-muted); margin-top:2px;">
+              Plan: <strong style="color:var(--emerald-dark);">${planName}</strong> &bull; Monthly Fee: <strong>₹${Number(student.monthly_fee || 2500).toLocaleString()}</strong> &bull; Installments: <strong>${installments.length} Months</strong>
+            </div>
+          </div>
+          <button class="btn btn-outline btn-sm" onclick="app.refreshInstallments(${student.id})" title="Refresh installment records">
+            🔄 Refresh Installments
+          </button>
+        </div>
+
+        ${installments.length === 0 ? `
+          <div style="text-align:center; padding:20px; color:var(--text-muted); font-size:13px; background:#f8fafc; border-radius:8px;">
+            No monthly installments initialized yet. Click "✏️ Update Fee Record" above to generate monthly installments.
+          </div>
+        ` : `
+          <div class="table-responsive" style="overflow-x:auto;">
+            <table class="data-table" style="width:100%; font-size:13px;">
+              <thead>
+                <tr style="background:#f8fafc; border-bottom:1.5px solid #e2e8f0; text-align:left;">
+                  <th style="padding:10px 12px;">Month</th>
+                  <th style="padding:10px 12px;">Due Date</th>
+                  <th style="padding:10px 12px;">Amount Due</th>
+                  <th style="padding:10px 12px;">Payment Ref / Mode</th>
+                  <th style="padding:10px 12px;">Status</th>
+                  <th style="padding:10px 12px; text-align:right;">Admin Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${installments.map(inst => {
+                  const isVerified = inst.status === 'VERIFIED';
+                  const isPendingVerif = inst.status === 'PENDING_VERIFICATION';
+                  const isOverdue = inst.is_overdue;
+
+                  return `
+                    <tr style="border-bottom:1px solid #f1f5f9; ${isPendingVerif ? 'background:#fffdf5;' : (isVerified ? 'background:#f0fdf4;' : '')}">
+                      <td style="padding:12px; font-weight:700; color:var(--dark-navy);">
+                        ${this.escape(inst.month_label)}
+                        <span style="font-size:11px; color:#64748b; font-weight:500; display:block;">Installment #${inst.installment_number}</span>
+                      </td>
+                      <td style="padding:12px;">
+                        <span style="font-weight:600; ${isOverdue ? 'color:#dc2626;' : 'color:#334155;'}">
+                          ${inst.due_date}
+                        </span>
+                        ${isOverdue ? '<span style="font-size:10px; color:#dc2626; font-weight:700; display:block;">⚠️ OVERDUE</span>' : ''}
+                      </td>
+                      <td style="padding:12px; font-weight:800; color:var(--dark-navy);">
+                        ₹${Number(inst.amount_due).toLocaleString()}
+                      </td>
+                      <td style="padding:12px;">
+                        ${inst.transaction_ref ? `
+                          <div style="font-weight:700; color:#1e293b; font-size:12.5px;">
+                            ${this.escape(inst.transaction_ref)}
+                          </div>
+                          <div style="font-size:11px; color:#64748b;">
+                            ${this.escape(inst.payment_mode || 'UPI')} ${inst.payment_date ? `&bull; ${inst.payment_date}` : ''}
+                          </div>
+                          ${inst.notes ? `<div style="font-size:11px; color:#64748b; font-style:italic;">"${this.escape(inst.notes)}"</div>` : ''}
+                        ` : `
+                          <span style="color:#94a3b8; font-size:12px;">—</span>
+                        `}
+                      </td>
+                      <td style="padding:12px;">
+                        ${isVerified ? `
+                          <span class="status-pill status-paid" style="background:#dcfce7; color:#15803d; border-color:#86efac; font-weight:700;">
+                            ✓ Verified (Paid)
+                          </span>
+                        ` : isPendingVerif ? `
+                          <span class="status-pill" style="background:#fef3c7; color:#b45309; border:1px solid #fde68a; font-weight:700;">
+                            ⏳ Submitted: Needs Verification
+                          </span>
+                        ` : `
+                          <span class="status-pill status-pending" style="background:#fef2f2; color:#dc2626; border-color:#fecaca; font-weight:700;">
+                            ⚠️ Due
+                          </span>
+                        `}
+                      </td>
+                      <td style="padding:12px; text-align:right;">
+                        ${isVerified ? `
+                          <div style="display:inline-flex; align-items:center; gap:6px;">
+                            <span style="font-size:12px; color:#15803d; font-weight:700;">✓ Verified</span>
+                            <button class="btn btn-outline" style="font-size:11px; padding:3px 8px; color:#64748b; border-color:#cbd5e1;" onclick="app.unverifyInstallment(${inst.id}, '${this.escape(inst.month_label)}')">
+                              Revert
+                            </button>
+                          </div>
+                        ` : `
+                          <button class="btn btn-primary btn-sm" style="font-size:12px; padding:5px 12px; font-weight:700;" onclick="app.verifyInstallment(${inst.id}, '${this.escape(inst.month_label)}', ${inst.amount_due})">
+                            ${isPendingVerif ? '✓ Verify & Approve' : '✓ Mark Verified'}
+                          </button>
+                        `}
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        `}
+      </div>
+    `;
+  },
+
+  renderStudentInstallmentsSchedule() {
+    if (!this.studentFeeData || !this.studentFeeData.installments || this.studentFeeData.installments.length === 0) {
+      return '';
+    }
+
+    const installments = this.studentFeeData.installments;
+    const planName = this.studentFeeData.course_duration === '3_MONTHS' ? '3 Months Course (₹2,500/mo)'
+      : (this.studentFeeData.course_duration === '1_YEAR' ? '1 Year Course (₹1,200/mo)'
+      : (this.studentFeeData.course_duration === 'INTERNSHIP' ? 'Internship (₹1,000/mo)'
+      : '6 Months Course (₹2,500/mo)'));
+
+    return `
+      <div style="margin-top:16px; border-top:1px dashed #cbd5e1; padding-top:14px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:6px;">
+          <div>
+            <span style="font-size:13px; font-weight:800; color:var(--dark-navy);">
+              🗓️ Monthly Fee Installments & Verification Schedule
+            </span>
+            <span style="font-size:11.5px; color:var(--text-muted); margin-left:8px;">
+              Plan: <strong style="color:var(--emerald-dark);">${planName}</strong>
+            </span>
+          </div>
+          <span style="font-size:11.5px; color:#64748b;">
+            Admin verifies each monthly payment upon receipt
+          </span>
+        </div>
+
+        <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px;">
+          ${installments.map(inst => {
+            const isVerified = inst.status === 'VERIFIED';
+            const isPendingVerif = inst.status === 'PENDING_VERIFICATION';
+            const isOverdue = inst.is_overdue;
+
+            let cardBg = '#f8fafc';
+            let borderColor = '#e2e8f0';
+            if (isVerified) {
+              cardBg = '#f0fdf4';
+              borderColor = '#bbf7d0';
+            } else if (isPendingVerif) {
+              cardBg = '#fffdf5';
+              borderColor = '#fde68a';
+            } else if (isOverdue) {
+              cardBg = '#fef2f2';
+              borderColor = '#fecaca';
+            }
+
+            return `
+              <div style="background:${cardBg}; border:1.5px solid ${borderColor}; border-radius:10px; padding:12px; position:relative;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
+                  <div>
+                    <span style="font-size:13.5px; font-weight:800; color:var(--dark-navy); display:block;">
+                      ${this.escape(inst.month_label)}
+                    </span>
+                    <span style="font-size:11px; ${isOverdue ? 'color:#dc2626; font-weight:700;' : 'color:#64748b;'}">
+                      Due: ${inst.due_date} ${isOverdue ? '⚠️ Overdue' : ''}
+                    </span>
+                  </div>
+                  <div style="text-align:right;">
+                    <span style="font-size:14px; font-weight:800; color:${isVerified ? '#15803d' : '#0f172a'};">
+                      ₹${Number(inst.amount_due).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+
+                <div style="margin-top:8px; display:flex; justify-content:space-between; align-items:center;">
+                  ${isVerified ? `
+                    <span class="status-pill status-paid" style="background:#dcfce7; color:#15803d; border-color:#86efac; font-size:11px; padding:2px 8px;">
+                      ✓ Verified by Admin
+                    </span>
+                    <span style="font-size:10.5px; color:#15803d; font-weight:600;">
+                      ${inst.payment_date || 'Paid'}
+                    </span>
+                  ` : isPendingVerif ? `
+                    <div>
+                      <span class="status-pill" style="background:#fef3c7; color:#b45309; border:1px solid #fde68a; font-size:11px; padding:2px 8px;">
+                        ⏳ Verification Pending
+                      </span>
+                      <div style="font-size:10.5px; color:#92400e; margin-top:3px;">
+                        Ref: ${this.escape(inst.transaction_ref || 'Submitted')}
+                      </div>
+                    </div>
+                    <button class="btn btn-outline" style="font-size:11px; padding:3px 8px; height:auto; line-height:1.2;" onclick="app.openSubmitPaymentModal(${inst.id}, '${this.escape(inst.month_label)}', ${inst.amount_due})">
+                      ✏️ Edit Ref
+                    </button>
+                  ` : `
+                    <span class="status-pill status-pending" style="background:#fef2f2; color:#dc2626; border-color:#fecaca; font-size:11px; padding:2px 8px;">
+                      ⚠️ Payment Due
+                    </span>
+                    <button class="btn btn-primary" style="font-size:11.5px; padding:3px 10px; height:auto; line-height:1.3; font-weight:700;" onclick="app.openSubmitPaymentModal(${inst.id}, '${this.escape(inst.month_label)}', ${inst.amount_due})">
+                      💳 Pay & Submit Ref
+                    </button>
+                  `}
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  },
+
+  openSubmitPaymentModal(installmentId, monthLabel, amountDue) {
+    document.getElementById('payModalInstallmentId').value = installmentId;
+    document.getElementById('payModalMonthLabel').innerText = monthLabel;
+    document.getElementById('payModalAmount').innerText = `₹${Number(amountDue).toLocaleString()}`;
+    document.getElementById('payModalTxnRef').value = '';
+    document.getElementById('payModalNotes').value = '';
+    this.openModal('submitPaymentModal');
+  },
+
+  async handleSubmitPaymentRef(e) {
+    e.preventDefault();
+    const installment_id = Number(document.getElementById('payModalInstallmentId').value);
+    const payment_mode = document.getElementById('payModalMode').value;
+    const transaction_ref = document.getElementById('payModalTxnRef').value.trim();
+    const notes = document.getElementById('payModalNotes').value.trim();
+
+    if (!transaction_ref) {
+      this.showToast('Please enter the transaction reference / UTR number', 'error', 'Missing Ref');
+      return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/api/student/submit-payment-ref`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.token}`
+        },
+        body: JSON.stringify({
+          installment_id,
+          transaction_ref,
+          payment_mode,
+          notes
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to submit payment reference');
+
+      this.closeModal('submitPaymentModal');
+      this.showToast('✓ Payment reference submitted! Admin will verify shortly.', 'success', 'Submitted');
+      await this.loadStudentPortal();
+    } catch (err) {
+      this.showToast(err.message, 'error', 'Submission Failed');
+    }
+  },
+
+  async verifyInstallment(installmentId, monthLabel, amountDue) {
+    if (!confirm(`Verify and approve ${monthLabel} payment of ₹${Number(amountDue).toLocaleString()}?`)) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/verify-installment`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.token}`
+        },
+        body: JSON.stringify({
+          installment_id: installmentId,
+          status: 'VERIFIED',
+          admin_id: this.currentUser.id
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to verify installment');
+
+      this.showToast(`✓ ${monthLabel} verified successfully!`, 'success', 'Payment Verified');
+      if (this.selectedStudentId) {
+        await this.fetchStudentPortfolio(this.selectedStudentId);
+        this.renderAdminPortal();
+      }
+      await this.loadAdminPortal();
+    } catch (err) {
+      this.showToast(err.message, 'error', 'Verification Failed');
+    }
+  },
+
+  async unverifyInstallment(installmentId, monthLabel) {
+    if (!confirm(`Are you sure you want to revert ${monthLabel} to DUE?`)) return;
+
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/verify-installment`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.token}`
+        },
+        body: JSON.stringify({
+          installment_id: installmentId,
+          status: 'DUE',
+          admin_id: this.currentUser.id
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update installment');
+
+      this.showToast(`Installment ${monthLabel} status reverted to DUE`, 'info', 'Status Updated');
+      if (this.selectedStudentId) {
+        await this.fetchStudentPortfolio(this.selectedStudentId);
+        this.renderAdminPortal();
+      }
+      await this.loadAdminPortal();
+    } catch (err) {
+      this.showToast(err.message, 'error', 'Revert Failed');
+    }
+  },
+
+  async refreshInstallments(studentId) {
+    await this.fetchStudentPortfolio(studentId);
+    this.renderAdminPortal();
+    this.showToast('Installments refreshed', 'info');
   },
 
   openUpdateSalaryModal(employeeId) {
@@ -3229,6 +3750,9 @@ const app = {
     };
 
     if (memberType === 'student') {
+      const durEl = document.getElementById('addCourseDuration');
+      const mFeeEl = document.getElementById('addMonthlyFee');
+      const dMonthsEl = document.getElementById('addDurationMonths');
       const trackEl = document.getElementById('addCourseTrack');
       const totalEl = document.getElementById('addStudentTotalFees');
       const paidEl = document.getElementById('addStudentPaidFees');
@@ -3237,12 +3761,18 @@ const app = {
       const notesEl = document.getElementById('addStudentPaymentNotes');
 
       payload.course_track = trackEl ? trackEl.value.trim() : '';
-      payload.total_fees = totalEl ? Number(totalEl.value || 0) : 0;
+      payload.course_duration = durEl ? durEl.value : '6_MONTHS';
+      payload.monthly_fee = mFeeEl ? Number(mFeeEl.value || 2500) : 2500;
+      payload.duration_months = dMonthsEl ? Number(dMonthsEl.value || 6) : 6;
+      payload.total_fees = totalEl ? Number(totalEl.value || (payload.monthly_fee * payload.duration_months)) : (payload.monthly_fee * payload.duration_months);
       payload.fees_paid = paidEl ? Number(paidEl.value || 0) : 0;
       payload.fees_status = statusEl ? statusEl.value : 'PENDING';
       payload.fees_due_date = dueEl ? dueEl.value : '';
       payload.payment_notes = notesEl ? notesEl.value.trim() : '';
     } else if (memberType === 'intern') {
+      const durEl = document.getElementById('addInternDuration');
+      const mFeeEl = document.getElementById('addInternMonthlyFee');
+      const dMonthsEl = document.getElementById('addInternDurationMonths');
       const trackEl = document.getElementById('addInternTrack');
       const totalEl = document.getElementById('addInternTotalFees');
       const paidEl = document.getElementById('addInternPaidFees');
@@ -3251,9 +3781,12 @@ const app = {
       const notesEl = document.getElementById('addInternPaymentNotes');
 
       payload.course_track = trackEl ? trackEl.value.trim() : 'Frontend Engineering Internship';
-      payload.total_fees = totalEl ? Number(totalEl.value || 0) : 0;
+      payload.course_duration = 'INTERNSHIP';
+      payload.monthly_fee = mFeeEl ? Number(mFeeEl.value || 1000) : 1000;
+      payload.duration_months = dMonthsEl ? Number(dMonthsEl.value || 3) : 3;
+      payload.total_fees = totalEl ? Number(totalEl.value || (payload.monthly_fee * payload.duration_months)) : (payload.monthly_fee * payload.duration_months);
       payload.fees_paid = paidEl ? Number(paidEl.value || 0) : 0;
-      payload.fees_status = statusEl ? statusEl.value : 'PAID';
+      payload.fees_status = statusEl ? statusEl.value : 'PENDING';
       payload.fees_due_date = dueEl ? dueEl.value : '';
       payload.payment_notes = notesEl ? notesEl.value.trim() : '';
     } else if (memberType === 'employee') {

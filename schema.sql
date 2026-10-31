@@ -21,6 +21,9 @@ CREATE TABLE IF NOT EXISTS users (
   fees_status TEXT DEFAULT 'PENDING', -- 'PAID', 'PARTIAL', 'PENDING'
   fees_due_date TEXT DEFAULT '',
   payment_notes TEXT DEFAULT '',
+  course_duration TEXT DEFAULT '6_MONTHS', -- '3_MONTHS', '6_MONTHS', '1_YEAR', 'INTERNSHIP'
+  monthly_fee REAL DEFAULT 2500,
+  duration_months INTEGER DEFAULT 6,
   salary_amount REAL DEFAULT 0,
   salary_status TEXT DEFAULT 'PENDING', -- 'PAID', 'PENDING', 'PROCESSING'
   salary_date TEXT DEFAULT '',
@@ -75,6 +78,28 @@ CREATE TABLE IF NOT EXISTS submissions (
   reviewed_by INTEGER REFERENCES users(id),
   reviewed_at TEXT,
   submitted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ============================================================================
+-- STUDENT FEE MONTHLY INSTALLMENTS TABLE (Installment Verification & Reminders)
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS student_fee_installments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  student_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  installment_number INTEGER NOT NULL,
+  month_label TEXT NOT NULL,
+  due_date TEXT NOT NULL,
+  amount_due REAL NOT NULL,
+  amount_paid REAL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'DUE', -- 'DUE', 'PAID', 'VERIFIED', 'OVERDUE'
+  payment_date TEXT,
+  transaction_ref TEXT,
+  payment_mode TEXT,
+  verified_by INTEGER REFERENCES users(id),
+  verified_at TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(student_id, installment_number)
 );
 
 -- ============================================================================
