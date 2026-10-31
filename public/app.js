@@ -271,70 +271,30 @@ const app = {
           <p style="font-size: 13px; color: var(--text-muted);">${subtitle}</p>
         </div>
 
-        ${role === 'student' ? `
-          <div class="auth-tabs">
-            <button class="auth-tab ${this.authTab === 'login' ? 'active' : ''}" onclick="app.setStudentAuthTab('login')">
-              Student Sign In
-            </button>
-            <button class="auth-tab ${this.authTab === 'register' ? 'active' : ''}" onclick="app.setStudentAuthTab('register')">
-              New Student Sign Up
-            </button>
-          </div>
-        ` : ''}
-
         ${errorMsg ? `<div class="alert-box alert-danger">⚠️ ${this.escape(errorMsg)}</div>` : ''}
         ${successMsg ? `<div class="alert-box alert-success">✓ ${this.escape(successMsg)}</div>` : ''}
 
-        ${(role !== 'student' || this.authTab === 'login') ? `
-          <form onsubmit="app.handleLogin(event, '${role}')">
-            <div class="form-group">
-              <label>Username / Login ID</label>
-              <input type="text" id="loginUsername" class="form-input" required placeholder="${userPlaceholder}" autocomplete="username">
+        <form onsubmit="app.handleLogin(event, '${role}')">
+          <div class="form-group">
+            <label>Username / Login ID</label>
+            <input type="text" id="loginUsername" class="form-input" required placeholder="${userPlaceholder}" autocomplete="username">
+          </div>
+          <div class="form-group">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+              <label style="margin-bottom:0;">Password</label>
+              <button type="button" onclick="app.togglePasswordVisibility('loginPassword', this)" style="background:none; border:none; color:var(--emerald-dark); font-size:12px; font-weight:700; cursor:pointer;">👁️ Show Password</button>
             </div>
-            <div class="form-group">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                <label style="margin-bottom:0;">Password</label>
-                <button type="button" onclick="app.togglePasswordVisibility('loginPassword', this)" style="background:none; border:none; color:var(--emerald-dark); font-size:12px; font-weight:700; cursor:pointer;">👁️ Show Password</button>
-              </div>
-              <input type="password" id="loginPassword" class="form-input" required placeholder="Enter your password" autocomplete="current-password">
-            </div>
-            <button type="submit" class="btn ${btnClass}" style="width: 100%; padding: 12px;">${btnText}</button>
-          </form>
+            <input type="password" id="loginPassword" class="form-input" required placeholder="Enter your password" autocomplete="current-password">
+          </div>
+          <button type="submit" class="btn ${btnClass}" style="width: 100%; padding: 12px;">${btnText}</button>
+        </form>
 
-          ${role === 'intern' ? `
-            <div style="text-align:center; margin-top:16px; font-size:12.5px; color:#64748b;">
-              New Intern? Contact GrowthNest administration for internship enrollment.
-            </div>
-          ` : ''}
-          ${role === 'employee' ? `
-            <div style="text-align:center; margin-top:16px; font-size:12.5px; color:#64748b;">
-              GrowthNest Staff & Mentor Portal &bull; Tirunelveli Division
-            </div>
-          ` : ''}
-        ` : `
-          <form onsubmit="app.handleRegister(event)">
-            <div class="form-group">
-              <label>Full Name *</label>
-              <input type="text" id="regName" class="form-input" required placeholder="e.g. Ramesh Kumar">
-            </div>
-            <div class="form-group">
-              <label>Username * (for login)</label>
-              <input type="text" id="regUser" class="form-input" required placeholder="Create username (e.g. Berlin2005)">
-            </div>
-            <div class="form-group">
-              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                <label style="margin-bottom:0;">Password *</label>
-                <button type="button" onclick="app.togglePasswordVisibility('regPass', this)" style="background:none; border:none; color:var(--emerald-dark); font-size:12px; font-weight:700; cursor:pointer;">👁️ Show</button>
-              </div>
-              <input type="password" id="regPass" class="form-input" required placeholder="Create a password">
-            </div>
-            <div class="form-group">
-              <label>Real Joining Date * (Time calculation starts from here)</label>
-              <input type="date" id="regJoinDate" class="form-input" value="${today}" required>
-            </div>
-            <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px;">Create Student Account & Start Task 1 &rarr;</button>
-          </form>
-        `}
+        <div style="text-align:center; margin-top:16px; font-size:12.5px; color:#64748b; line-height:1.5;">
+          ${role === 'student' ? 'Enrolled by GrowthNest Admin? Sign in with your registered username & password.<br><span style="font-size:11.5px; color:#94a3b8;">New student enrollment & tuition fee setup is managed directly by Admin.</span>' : ''}
+          ${role === 'intern' ? 'GrowthNest Internship Program &bull; Tasks & stipend/fees are allocated by Admin.' : ''}
+          ${role === 'employee' ? 'GrowthNest Staff & Mentor Portal &bull; Salaries & profiles are managed by Admin.' : ''}
+          ${role === 'admin' ? 'Authorized Management & Mentors Only &bull; Tirunelveli Center' : ''}
+        </div>
       </div>
     `;
   },
@@ -1435,6 +1395,12 @@ const app = {
                     <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:60%;">📌 ${this.escape(s.current_task_title || 'Task 1')}</span>
                     <span class="status-pill status-${(s.fees_status || 'PENDING').toLowerCase()}" style="font-size:9.5px; padding:1px 6px;">Fees: ${s.fees_status || 'PENDING'}</span>
                   </div>
+                  <div style="margin-top:7px; padding-top:6px; border-top:1px dashed #e2e8f0; display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:11px; color:#64748b;">
+                      ${(s.total_fees || 0) > 0 ? `💰 Due: <b style="color:${((s.total_fees || 0) - (s.fees_paid || 0)) > 0 ? '#b91c1c' : '#15803d'};">₹${Math.max(0, (s.total_fees || 0) - (s.fees_paid || 0)).toLocaleString()}</b>` : '<span style="color:#d97706; font-weight:600;">⚠️ Fees not set</span>'}
+                    </span>
+                    <button type="button" class="btn btn-outline" style="font-size:11px; padding:2px 8px; height:auto; line-height:1.4;" onclick="event.stopPropagation(); app.openUpdateFeesModal(${s.id})">✏️ Fees</button>
+                  </div>
                 </div>
               `;
             }).join('')}
@@ -1585,6 +1551,12 @@ const app = {
                     <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:60%;">📌 ${this.escape(s.current_task_title || 'Task 1')}</span>
                     <span class="status-pill status-${(s.fees_status || 'PENDING').toLowerCase()}" style="font-size:9.5px; padding:1px 6px;">Fees: ${s.fees_status || 'PENDING'}</span>
                   </div>
+                  <div style="margin-top:7px; padding-top:6px; border-top:1px dashed #e2e8f0; display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:11px; color:#64748b;">
+                      ${(s.total_fees || 0) > 0 ? `💰 Due: <b style="color:${((s.total_fees || 0) - (s.fees_paid || 0)) > 0 ? '#b91c1c' : '#15803d'};">₹${Math.max(0, (s.total_fees || 0) - (s.fees_paid || 0)).toLocaleString()}</b>` : '<span style="color:#d97706; font-weight:600;">⚠️ Fees not set</span>'}
+                    </span>
+                    <button type="button" class="btn btn-outline" style="font-size:11px; padding:2px 8px; height:auto; line-height:1.4;" onclick="event.stopPropagation(); app.openUpdateFeesModal(${s.id})">✏️ Fees</button>
+                  </div>
                 </div>
               `;
             }).join('')}
@@ -1728,6 +1700,12 @@ const app = {
                   <div style="font-size:11px; color:#475569; display:flex; justify-content:space-between; align-items:center;">
                     <span>💰 ₹${Number(s.salary_amount || 0).toLocaleString()} /mo</span>
                     <span class="status-pill status-${(s.salary_status || 'PENDING').toLowerCase()}" style="font-size:9.5px; padding:1px 6px;">Salary: ${s.salary_status || 'PENDING'}</span>
+                  </div>
+                  <div style="margin-top:7px; padding-top:6px; border-top:1px dashed #e2e8f0; display:flex; justify-content:space-between; align-items:center;">
+                    <span style="font-size:11px; color:#64748b;">
+                      ${(s.salary_amount || 0) > 0 ? `💼 <b style="color:#1d4ed8;">₹${Number(s.salary_amount || 0).toLocaleString()}</b>/mo` : '<span style="color:#d97706; font-weight:600;">⚠️ Salary not set</span>'}
+                    </span>
+                    <button type="button" class="btn btn-outline" style="font-size:11px; padding:2px 8px; height:auto; line-height:1.4;" onclick="event.stopPropagation(); app.openUpdateSalaryModal(${s.id})">✏️ Salary</button>
                   </div>
                 </div>
               `;
@@ -2048,6 +2026,21 @@ const app = {
         </div>
       </div>
 
+      ${(!emp.salary_amount || Number(emp.salary_amount) === 0) ? `
+        <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:12px 16px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:18px;">⚠️</span>
+            <div>
+              <strong style="color:#92400e; font-size:13px;">Salary details not yet configured for this staff member</strong>
+              <div style="font-size:12px; color:#b45309;">Enter monthly salary, designation, and payment mode now.</div>
+            </div>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="app.openUpdateSalaryModal(${emp.id})">
+            ➕ Enter Salary Details Now
+          </button>
+        </div>
+      ` : ''}
+
       <!-- Employee Salary & Compensation Details Card -->
       <div class="salary-summary-card accent-indigo">
         <div class="summary-card-header">
@@ -2166,6 +2159,21 @@ const app = {
         </div>
       </div>
 
+      ${(!student.total_fees || Number(student.total_fees) === 0) ? `
+        <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:12px 16px; margin-bottom:16px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:18px;">⚠️</span>
+            <div>
+              <strong style="color:#92400e; font-size:13px;">Fee record not yet configured for this ${isIntern ? 'intern' : 'student'}</strong>
+              <div style="font-size:12px; color:#b45309;">Enter total course fee, paid amount, and due date.</div>
+            </div>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="app.openUpdateFeesModal(${student.id})">
+            ➕ Enter Fees Details Now
+          </button>
+        </div>
+      ` : ''}
+
       <!-- Fees & Payment Details Card -->
       <div class="fees-summary-card accent-emerald">
         <div class="summary-card-header">
@@ -2206,7 +2214,6 @@ const app = {
             <span>${this.escape(student.payment_notes)}</span>
           </div>
         ` : ''}
-      </div>
       </div>
 
       <!-- ACTIVE SUBMISSION AWAITING REVIEW (If student has a pending task) -->
