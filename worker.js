@@ -32,6 +32,51 @@ function jsonResponse(data, status = 200) {
   });
 }
 
+function formatUserResponse(user) {
+  if (!user) return null;
+  const totalFees = Number(user.total_fees || 0);
+  const feesPaid = Number(user.fees_paid || 0);
+  const pendingFees = Math.max(0, totalFees - feesPaid);
+  let feesStatus = user.fees_status;
+  if (!feesStatus) {
+    if (totalFees === 0) feesStatus = "PAID";
+    else if (feesPaid >= totalFees) feesStatus = "PAID";
+    else if (feesPaid > 0) feesStatus = "PARTIAL";
+    else feesStatus = "PENDING";
+  }
+
+  const userType = user.user_type || (user.role === "admin" ? "admin" : "student");
+
+  return {
+    id: user.id,
+    username: user.username,
+    full_name: user.full_name,
+    email: user.email || "",
+    phone: user.phone || "",
+    role: user.role,
+    user_type: userType,
+    designation: user.designation || (userType === "employee" ? "Staff Member" : ""),
+    department: user.department || (userType === "employee" ? "Technical Training" : ""),
+    avatar_url: user.avatar_url || null,
+    joining_date: user.joining_date,
+    course_track: user.course_track || "Frontend Web Development (HTML/CSS/JS)",
+    days_enrolled: calculateDaysEnrolled(user.joining_date),
+    // Fees Details (for Course Students & Interns)
+    total_fees: totalFees,
+    fees_paid: feesPaid,
+    pending_fees: pendingFees,
+    fees_status: feesStatus,
+    fees_due_date: user.fees_due_date || "",
+    payment_notes: user.payment_notes || "",
+    // Salary Details (for Staff / Employees)
+    salary_amount: Number(user.salary_amount || 0),
+    salary_status: user.salary_status || "PENDING",
+    salary_date: user.salary_date || "",
+    payment_mode: user.payment_mode || "Bank Transfer",
+    salary_notes: user.salary_notes || ""
+  };
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
@@ -117,16 +162,7 @@ export default {
 
         return jsonResponse({
           token,
-          user: {
-            id: user.id,
-            username: user.username,
-            full_name: user.full_name,
-            role: user.role,
-            avatar_url: user.avatar_url || null,
-            joining_date: user.joining_date,
-            course_track: user.course_track,
-            days_enrolled: calculateDaysEnrolled(user.joining_date)
-          }
+          user: formatUserResponse(user)
         });
       }
 
@@ -134,7 +170,7 @@ export default {
       // AUTH: Register (Account Creation)
       // ----------------------------------------------------------------------
       if (url.pathname === "/api/auth/register" && request.method === "POST") {
-        const { full_name, username, password, email, phone, role, joining_date, course_track } = await request.json();
+        const { full_name, username, password, email, phone, role, user_type, joining_date, course_track, designation, department } = await request.json();
 
         if (!full_name || !username || !password) {
           return jsonResponse({ error: "Full name, username, and password are required" }, 400);
@@ -147,39 +183,33 @@ export default {
 
         const passHash = await sha256(password);
         const assignedRole = role === "admin" ? "admin" : "student";
+        const assignedType = user_type || (assignedRole === "admin" ? "admin" : "student");
         const joinDate = joining_date || new Date().toISOString().split("T")[0];
-        const track = course_track || "Frontend Web Development (HTML/CSS/JS)";
+        const track = course_track || (assignedType === "intern" ? "Frontend Engineering Internship" : "Frontend Web Development (HTML/CSS/JS)");
 
         const res = await db
           .prepare(
-            `INSERT INTO users (username, password_hash, role, full_name, email, phone, joining_date, course_track)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+            `INSERT INTO users (username, password_hash, role, user_type, full_name, email, phone, joining_date, course_track, designation, department)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
           )
-          .bind(username, passHash, assignedRole, full_name, email || "", phone || "", joinDate, track)
+          .bind(username, passHash, assignedRole, assignedType, full_name, email || "", phone || "", joinDate, track, designation || "", department || "")
           .run();
 
         const userId = res.meta.last_row_id;
 
-        if (assignedRole === "student") {
+        if (assignedType !== "employee" && assignedRole !== "admin") {
           await db
             .prepare("INSERT INTO student_progress (student_id, current_task_id, status) VALUES (?, 1, 'IN_PROGRESS')")
             .bind(userId)
             .run();
         }
 
+        const createdUser = await db.prepare("SELECT * FROM users WHERE id = ?").bind(userId).first();
         const token = btoa(JSON.stringify({ id: userId, username, role: assignedRole }));
 
         return jsonResponse({
           token,
-          user: {
-            id: userId,
-            username,
-            full_name,
-            role: assignedRole,
-            joining_date: joinDate,
-            course_track: track,
-            days_enrolled: 1
-          },
+          user: formatUserResponse(createdUser),
           message: "Account registered successfully!"
         });
       }
@@ -197,16 +227,7 @@ export default {
         if (!user) return jsonResponse({ error: "User not found" }, 404);
 
         return jsonResponse({
-          user: {
-            id: user.id,
-            username: user.username,
-            full_name: user.full_name,
-            role: user.role,
-            avatar_url: user.avatar_url || null,
-            joining_date: user.joining_date,
-            course_track: user.course_track,
-            days_enrolled: calculateDaysEnrolled(user.joining_date)
-          }
+          user: formatUserResponse(user)
         });
       }
 
@@ -415,13 +436,32 @@ export default {
       // ADMIN: KPI Stats (Real Database Counts)
       // ----------------------------------------------------------------------
       if (url.pathname === "/api/admin/stats" && request.method === "GET") {
-        const totalStudents = (await db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'student'").first()).count;
-        const pendingReviews = (await db.prepare("SELECT COUNT(*) as count FROM submissions WHERE status = 'PENDING'").first()).count;
-        const approvedTasks = (await db.prepare("SELECT COUNT(*) as count FROM submissions WHERE status = 'APPROVED'").first()).count;
-        const rejectedTasks = (await db.prepare("SELECT COUNT(*) as count FROM submissions WHERE status = 'CHANGES_REQUESTED'").first()).count;
+        const totalCourseStudents = (await db.prepare("SELECT COUNT(*) as count FROM users WHERE role != 'admin' AND (user_type = 'student' OR user_type IS NULL OR user_type = '')").first())?.count || 0;
+        const totalInterns = (await db.prepare("SELECT COUNT(*) as count FROM users WHERE user_type = 'intern'").first())?.count || 0;
+        const totalEmployees = (await db.prepare("SELECT COUNT(*) as count FROM users WHERE user_type = 'employee'").first())?.count || 0;
+        const totalStudents = totalCourseStudents + totalInterns;
+
+        const feesStats = await db.prepare("SELECT SUM(total_fees) as total_fees, SUM(fees_paid) as fees_paid FROM users WHERE role != 'admin'").first();
+        const totalFees = Number(feesStats?.total_fees || 0);
+        const totalFeesPaid = Number(feesStats?.fees_paid || 0);
+        const totalPendingFees = Math.max(0, totalFees - totalFeesPaid);
+
+        const salaryStats = await db.prepare("SELECT SUM(salary_amount) as total_salary FROM users WHERE user_type = 'employee'").first();
+        const totalSalary = Number(salaryStats?.total_salary || 0);
+
+        const pendingReviews = (await db.prepare("SELECT COUNT(*) as count FROM submissions WHERE status = 'PENDING'").first())?.count || 0;
+        const approvedTasks = (await db.prepare("SELECT COUNT(*) as count FROM submissions WHERE status = 'APPROVED'").first())?.count || 0;
+        const rejectedTasks = (await db.prepare("SELECT COUNT(*) as count FROM submissions WHERE status = 'CHANGES_REQUESTED'").first())?.count || 0;
 
         return jsonResponse({
           total_students: totalStudents,
+          total_course_students: totalCourseStudents,
+          total_interns: totalInterns,
+          total_employees: totalEmployees,
+          total_fees: totalFees,
+          total_fees_paid: totalFeesPaid,
+          total_pending_fees: totalPendingFees,
+          total_salary: totalSalary,
           pending_reviews: pendingReviews,
           approved_tasks: approvedTasks,
           rejected_tasks: rejectedTasks
@@ -429,18 +469,28 @@ export default {
       }
 
       // ----------------------------------------------------------------------
-      // ADMIN: Get All Students with Joining Dates & Days Count
+      // ADMIN: Get All Students / Members with Enriched Details
       // ----------------------------------------------------------------------
       if (url.pathname === "/api/admin/students" && request.method === "GET") {
         const studentsResult = await db
-          .prepare("SELECT id, username, full_name, email, phone, joining_date, course_track, created_at, avatar_url FROM users WHERE role = 'student' ORDER BY id DESC")
+          .prepare("SELECT * FROM users WHERE role != 'admin' ORDER BY id DESC")
           .all();
 
         const students = await Promise.all(
-          (studentsResult.results || []).map(async student => {
-            const daysEnrolled = calculateDaysEnrolled(student.joining_date);
+          (studentsResult.results || []).map(async rawUser => {
+            const formatted = formatUserResponse(rawUser);
 
-            // Get current active progress
+            if (formatted.user_type === "employee") {
+              return {
+                ...formatted,
+                current_task_title: formatted.designation || "GrowthNest Staff",
+                current_task_status: formatted.salary_status === "PAID" ? "APPROVED" : "IN_PROGRESS",
+                completed_count: 0,
+                pending_count: 0
+              };
+            }
+
+            // For Course Students & Interns: get progress & pending submissions
             const progress = await db
               .prepare(
                 `SELECT sp.*, t.title as task_title, t.sequence_order
@@ -449,28 +499,25 @@ export default {
                  WHERE sp.student_id = ?
                  ORDER BY t.sequence_order DESC LIMIT 1`
               )
-              .bind(student.id)
+              .bind(formatted.id)
               .first();
 
-            // Total completed tasks count
-            const completedCount = await db
+            const completedCount = (await db
               .prepare("SELECT COUNT(*) as count FROM student_progress WHERE student_id = ? AND status = 'APPROVED'")
-              .bind(student.id)
-              .first();
+              .bind(formatted.id)
+              .first())?.count || 0;
 
-            // Total pending reviews count for this student
-            const pendingCount = await db
+            const pendingCount = (await db
               .prepare("SELECT COUNT(*) as count FROM submissions WHERE student_id = ? AND status = 'PENDING'")
-              .bind(student.id)
-              .first();
+              .bind(formatted.id)
+              .first())?.count || 0;
 
             return {
-              ...student,
-              days_enrolled: daysEnrolled,
+              ...formatted,
               current_task_title: progress ? progress.task_title : "Task 1: HTML Semantic Resume",
               current_task_status: progress ? progress.status : "IN_PROGRESS",
-              completed_count: completedCount ? completedCount.count : 0,
-              pending_count: pendingCount ? pendingCount.count : 0
+              completed_count: completedCount,
+              pending_count: pendingCount
             };
           })
         );
@@ -479,19 +526,32 @@ export default {
       }
 
       // ----------------------------------------------------------------------
-      // ADMIN: Dedicated Student Portfolio & History (Per-Student Workspace)
+      // ADMIN: Dedicated Student / Member Portfolio & History
       // ----------------------------------------------------------------------
       if (url.pathname === "/api/admin/student-portfolio" && request.method === "GET") {
         const studentId = Number(url.searchParams.get("student_id"));
         if (!studentId) return jsonResponse({ error: "student_id is required" }, 400);
 
-        const student = await db
-          .prepare("SELECT id, username, full_name, email, phone, joining_date, course_track, avatar_url FROM users WHERE id = ?")
+        const rawUser = await db
+          .prepare("SELECT * FROM users WHERE id = ?")
           .bind(studentId)
           .first();
-        if (!student) return jsonResponse({ error: "Student not found" }, 404);
+        if (!rawUser) return jsonResponse({ error: "User not found" }, 404);
 
-        student.days_enrolled = calculateDaysEnrolled(student.joining_date);
+        const student = formatUserResponse(rawUser);
+
+        // If employee, return clean staff portfolio
+        if (student.user_type === "employee") {
+          return jsonResponse({
+            student,
+            submissions: [],
+            pending_submission: null,
+            roadmap: [],
+            total_tasks: 0,
+            completed_tasks: 0,
+            pending_count: 0
+          });
+        }
 
         const subsRes = await db
           .prepare(
@@ -522,7 +582,6 @@ export default {
         const progMap = {};
         (progRes.results || []).forEach(p => { progMap[p.current_task_id] = p.status; });
 
-        // Only show pending review for tasks that are NOT already approved!
         const pendingSubmission = submissions.find(s => s.status === "PENDING" && progMap[s.task_id] !== "APPROVED") ||
           submissions.find(s => s.status === "CHANGES_REQUESTED" && progMap[s.task_id] !== "APPROVED") || null;
 
@@ -547,46 +606,189 @@ export default {
       }
 
       // ----------------------------------------------------------------------
-      // ADMIN: Add New Student
+      // ADMIN: Add New Member (Course Student, Intern, or Employee)
       // ----------------------------------------------------------------------
       if (url.pathname === "/api/admin/students" && request.method === "POST") {
-        const { username, password, full_name, email, phone, joining_date, course_track } = await request.json();
+        const body = await request.json();
+        const {
+          username,
+          password,
+          full_name,
+          email,
+          phone,
+          joining_date,
+          user_type,
+          course_track,
+          designation,
+          department,
+          total_fees,
+          fees_paid,
+          fees_status,
+          fees_due_date,
+          payment_notes,
+          salary_amount,
+          salary_status,
+          salary_date,
+          payment_mode,
+          salary_notes
+        } = body;
 
         if (!username || !password || !full_name || !joining_date) {
           return jsonResponse({ error: "Username, password, full name, and joining date are required" }, 400);
         }
 
         const passHash = await sha256(password);
+        const assignedType = user_type || "student";
+        const track = course_track || (assignedType === "intern" ? "Frontend Engineering Internship" : "Frontend Web Development (HTML/CSS/JS)");
+
+        const tFees = Number(total_fees || 0);
+        const pFees = Number(fees_paid || 0);
+        let fStatus = fees_status;
+        if (!fStatus) {
+          if (tFees === 0) fStatus = "PAID";
+          else if (pFees >= tFees) fStatus = "PAID";
+          else if (pFees > 0) fStatus = "PARTIAL";
+          else fStatus = "PENDING";
+        }
+
+        const sAmount = Number(salary_amount || 0);
+        const sStatus = salary_status || "PENDING";
 
         try {
           const res = await db
             .prepare(
-              `INSERT INTO users (username, password_hash, role, full_name, email, phone, joining_date, course_track)
-               VALUES (?, ?, 'student', ?, ?, ?, ?, ?)`
+              `INSERT INTO users (
+                username, password_hash, role, user_type, full_name, email, phone, joining_date, course_track,
+                designation, department, total_fees, fees_paid, fees_status, fees_due_date, payment_notes,
+                salary_amount, salary_status, salary_date, payment_mode, salary_notes
+              ) VALUES (?, ?, 'student', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
             )
             .bind(
               username,
               passHash,
+              assignedType,
               full_name,
               email || "",
               phone || "",
               joining_date,
-              course_track || "Frontend Web Development (HTML/CSS/JS)"
+              track,
+              designation || "",
+              department || "",
+              tFees,
+              pFees,
+              fStatus,
+              fees_due_date || "",
+              payment_notes || "",
+              sAmount,
+              sStatus,
+              salary_date || "",
+              payment_mode || "Bank Transfer",
+              salary_notes || ""
             )
             .run();
 
-          const newStudentId = res.meta.last_row_id;
+          const newMemberId = res.meta.last_row_id;
 
-          // Unlock first task (Task 1: HTML)
-          await db
-            .prepare("INSERT INTO student_progress (student_id, current_task_id, status) VALUES (?, 1, 'IN_PROGRESS')")
-            .bind(newStudentId)
-            .run();
+          // If student or intern, unlock first task (Task 1: HTML)
+          if (assignedType !== "employee") {
+            await db
+              .prepare("INSERT INTO student_progress (student_id, current_task_id, status) VALUES (?, 1, 'IN_PROGRESS')")
+              .bind(newMemberId)
+              .run();
+          }
 
-          return jsonResponse({ success: true, student_id: newStudentId, message: "Student enrolled successfully!" });
+          const label = assignedType === "intern" ? "Intern" : (assignedType === "employee" ? "Employee / Staff" : "Student");
+          return jsonResponse({
+            success: true,
+            student_id: newMemberId,
+            message: `${label} "${full_name}" registered successfully!`
+          });
         } catch (err) {
           return jsonResponse({ error: "Username already exists or database error: " + err.message }, 400);
         }
+      }
+
+      // ----------------------------------------------------------------------
+      // ADMIN: Update Student / Intern Fees
+      // ----------------------------------------------------------------------
+      if (url.pathname === "/api/admin/update-fees" && request.method === "POST") {
+        const { student_id, total_fees, fees_paid, fees_status, fees_due_date, payment_notes } = await request.json();
+        if (!student_id) return jsonResponse({ error: "student_id is required" }, 400);
+
+        const tFees = Number(total_fees || 0);
+        const pFees = Number(fees_paid || 0);
+        let status = fees_status;
+        if (!status) {
+          if (tFees === 0) status = "PAID";
+          else if (pFees >= tFees) status = "PAID";
+          else if (pFees > 0) status = "PARTIAL";
+          else status = "PENDING";
+        }
+
+        await db
+          .prepare(
+            `UPDATE users 
+             SET total_fees = ?, fees_paid = ?, fees_status = ?, fees_due_date = ?, payment_notes = ?
+             WHERE id = ?`
+          )
+          .bind(tFees, pFees, status, fees_due_date || "", payment_notes || "", Number(student_id))
+          .run();
+
+        return jsonResponse({
+          success: true,
+          message: "Fee details updated successfully!",
+          fees: {
+            total_fees: tFees,
+            fees_paid: pFees,
+            pending_fees: Math.max(0, tFees - pFees),
+            fees_status: status,
+            fees_due_date: fees_due_date || "",
+            payment_notes: payment_notes || ""
+          }
+        });
+      }
+
+      // ----------------------------------------------------------------------
+      // ADMIN: Update Employee / Staff Salary
+      // ----------------------------------------------------------------------
+      if (url.pathname === "/api/admin/update-salary" && request.method === "POST") {
+        const { employee_id, designation, department, salary_amount, salary_status, salary_date, payment_mode, salary_notes } = await request.json();
+        if (!employee_id) return jsonResponse({ error: "employee_id is required" }, 400);
+
+        const sAmount = Number(salary_amount || 0);
+        const sStatus = salary_status || "PENDING";
+
+        await db
+          .prepare(
+            `UPDATE users 
+             SET designation = ?, department = ?, salary_amount = ?, salary_status = ?, salary_date = ?, payment_mode = ?, salary_notes = ?
+             WHERE id = ?`
+          )
+          .bind(
+            designation || "",
+            department || "",
+            sAmount,
+            sStatus,
+            salary_date || "",
+            payment_mode || "Bank Transfer",
+            salary_notes || "",
+            Number(employee_id)
+          )
+          .run();
+
+        return jsonResponse({
+          success: true,
+          message: "Staff salary details updated successfully!",
+          salary: {
+            designation: designation || "",
+            department: department || "",
+            salary_amount: sAmount,
+            salary_status: sStatus,
+            salary_date: salary_date || "",
+            payment_mode: payment_mode || "Bank Transfer",
+            salary_notes: salary_notes || ""
+          }
+        });
       }
 
       // ----------------------------------------------------------------------

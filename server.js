@@ -282,6 +282,51 @@ function sendJson(res, data, status = 200) {
   res.end(JSON.stringify(data));
 }
 
+function formatUserResponse(user) {
+  if (!user) return null;
+  const totalFees = Number(user.total_fees || 0);
+  const feesPaid = Number(user.fees_paid || 0);
+  const pendingFees = Math.max(0, totalFees - feesPaid);
+  let feesStatus = user.fees_status;
+  if (!feesStatus) {
+    if (totalFees === 0) feesStatus = 'PAID';
+    else if (feesPaid >= totalFees) feesStatus = 'PAID';
+    else if (feesPaid > 0) feesStatus = 'PARTIAL';
+    else feesStatus = 'PENDING';
+  }
+
+  const userType = user.user_type || (user.role === 'admin' ? 'admin' : 'student');
+
+  return {
+    id: user.id,
+    username: user.username,
+    full_name: user.full_name,
+    email: user.email || '',
+    phone: user.phone || '',
+    role: user.role,
+    user_type: userType,
+    designation: user.designation || (userType === 'employee' ? 'Staff Member' : ''),
+    department: user.department || (userType === 'employee' ? 'Technical Training' : ''),
+    avatar_url: user.avatar_url || null,
+    joining_date: user.joining_date,
+    course_track: user.course_track || 'Frontend Web Development (HTML/CSS/JS)',
+    days_enrolled: calculateDaysEnrolled(user.joining_date),
+    // Fees Details (for Course Students & Interns)
+    total_fees: totalFees,
+    fees_paid: feesPaid,
+    pending_fees: pendingFees,
+    fees_status: feesStatus,
+    fees_due_date: user.fees_due_date || '',
+    payment_notes: user.payment_notes || '',
+    // Salary Details (for Staff / Employees)
+    salary_amount: Number(user.salary_amount || 0),
+    salary_status: user.salary_status || 'PENDING',
+    salary_date: user.salary_date || '',
+    payment_mode: user.payment_mode || 'Bank Transfer',
+    salary_notes: user.salary_notes || ''
+  };
+}
+
 function parseJsonBody(req) {
   return new Promise((resolve, reject) => {
     let body = '';
@@ -497,16 +542,7 @@ const requestHandler = async (req, res) => {
 
       return sendJson(res, {
         token,
-        user: {
-          id: user.id,
-          username: user.username,
-          full_name: user.full_name,
-          role: user.role,
-          joining_date: user.joining_date,
-          course_track: user.course_track,
-          avatar_url: user.avatar_url || null,
-          days_enrolled: calculateDaysEnrolled(user.joining_date)
-        }
+        user: formatUserResponse(user)
       });
     }
 
@@ -514,7 +550,7 @@ const requestHandler = async (req, res) => {
     // API: Register / Account Creation
     // ------------------------------------------------------------------------
     if (pathname === '/api/auth/register' && req.method === 'POST') {
-      const { full_name, username, password, email, phone, role, joining_date, course_track } = await parseJsonBody(req);
+      const { full_name, username, password, email, phone, role, user_type, joining_date, course_track, designation, department } = await parseJsonBody(req);
 
       if (!full_name || !username || !password) {
         return sendJson(res, { error: 'Full name, username, and password are required' }, 400);
@@ -526,36 +562,30 @@ const requestHandler = async (req, res) => {
       }
 
       const assignedRole = role === 'admin' ? 'admin' : 'student';
+      const assignedType = user_type || (assignedRole === 'admin' ? 'admin' : 'student');
       const joinDate = joining_date || new Date().toISOString().split('T')[0];
-      const track = course_track || 'Frontend Web Development (HTML/CSS/JS)';
+      const track = course_track || (assignedType === 'intern' ? 'Frontend Engineering Internship' : 'Frontend Web Development (HTML/CSS/JS)');
       const hashed = sha256(password);
 
       const stmt = db.prepare(`
-        INSERT INTO users (username, password_hash, role, full_name, email, phone, joining_date, course_track)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO users (username, password_hash, role, user_type, full_name, email, phone, joining_date, course_track, designation, department)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
-      const result = stmt.run(username, hashed, assignedRole, full_name, email || '', phone || '', joinDate, track);
+      const result = stmt.run(username, hashed, assignedRole, assignedType, full_name, email || '', phone || '', joinDate, track, designation || '', department || '');
       const userId = Number(result.lastInsertRowid);
 
-      if (assignedRole === 'student') {
+      if (assignedType !== 'employee' && assignedRole !== 'admin') {
         const progStmt = db.prepare(`INSERT INTO student_progress (student_id, current_task_id, status) VALUES (?, 1, 'IN_PROGRESS')`);
         progStmt.run(userId);
       }
 
+      const createdUser = db.prepare('SELECT * FROM users WHERE id = ?').get(userId);
       const token = Buffer.from(JSON.stringify({ id: userId, username, role: assignedRole })).toString('base64');
 
       return sendJson(res, {
         token,
-        user: {
-          id: userId,
-          username,
-          full_name,
-          role: assignedRole,
-          joining_date: joinDate,
-          course_track: track,
-          days_enrolled: 1
-        },
-        message: 'Account created successfully! Task 1 (HTML Basics) assigned.'
+        user: formatUserResponse(createdUser),
+        message: 'Account created successfully!'
       });
     }
 
@@ -574,16 +604,7 @@ const requestHandler = async (req, res) => {
       if (!user) return sendJson(res, { error: 'User not found' }, 404);
 
       return sendJson(res, {
-        user: {
-          id: user.id,
-          username: user.username,
-          full_name: user.full_name,
-          role: user.role,
-          joining_date: user.joining_date,
-          course_track: user.course_track,
-          avatar_url: user.avatar_url || null,
-          days_enrolled: calculateDaysEnrolled(user.joining_date)
-        }
+        user: formatUserResponse(user)
       });
     }
 
@@ -787,13 +808,32 @@ const requestHandler = async (req, res) => {
     // API: Admin KPI Stats (Real Database Counts)
     // ------------------------------------------------------------------------
     if (pathname === '/api/admin/stats' && req.method === 'GET') {
-      const totalStudents = db.prepare("SELECT COUNT(*) as count FROM users WHERE role = 'student'").get().count;
+      const totalCourseStudents = db.prepare("SELECT COUNT(*) as count FROM users WHERE role != 'admin' AND (user_type = 'student' OR user_type IS NULL OR user_type = '')").get().count;
+      const totalInterns = db.prepare("SELECT COUNT(*) as count FROM users WHERE user_type = 'intern'").get().count;
+      const totalEmployees = db.prepare("SELECT COUNT(*) as count FROM users WHERE user_type = 'employee'").get().count;
+      const totalStudents = totalCourseStudents + totalInterns;
+
+      const feesStats = db.prepare("SELECT SUM(total_fees) as total_fees, SUM(fees_paid) as fees_paid FROM users WHERE role != 'admin'").get();
+      const totalFees = Number(feesStats?.total_fees || 0);
+      const totalFeesPaid = Number(feesStats?.fees_paid || 0);
+      const totalPendingFees = Math.max(0, totalFees - totalFeesPaid);
+
+      const salaryStats = db.prepare("SELECT SUM(salary_amount) as total_salary FROM users WHERE user_type = 'employee'").get();
+      const totalSalary = Number(salaryStats?.total_salary || 0);
+
       const pendingReviews = db.prepare("SELECT COUNT(*) as count FROM submissions WHERE status = 'PENDING'").get().count;
       const approvedTasks = db.prepare("SELECT COUNT(*) as count FROM submissions WHERE status = 'APPROVED'").get().count;
       const rejectedTasks = db.prepare("SELECT COUNT(*) as count FROM submissions WHERE status = 'CHANGES_REQUESTED'").get().count;
 
       return sendJson(res, {
         total_students: totalStudents,
+        total_course_students: totalCourseStudents,
+        total_interns: totalInterns,
+        total_employees: totalEmployees,
+        total_fees: totalFees,
+        total_fees_paid: totalFeesPaid,
+        total_pending_fees: totalPendingFees,
+        total_salary: totalSalary,
         pending_reviews: pendingReviews,
         approved_tasks: approvedTasks,
         rejected_tasks: rejectedTasks
@@ -801,17 +841,25 @@ const requestHandler = async (req, res) => {
     }
 
     // ------------------------------------------------------------------------
-    // API: Admin Students List
+    // API: Admin Students / Members List
     // ------------------------------------------------------------------------
     if (pathname === '/api/admin/students' && req.method === 'GET') {
-      const stmt = db.prepare(`
-        SELECT id, username, full_name, email, phone, joining_date, course_track, created_at, avatar_url
-        FROM users WHERE role = 'student' ORDER BY id DESC
-      `);
-      const students = stmt.all();
+      const stmt = db.prepare(`SELECT * FROM users WHERE role != 'admin' ORDER BY id DESC`);
+      const rawUsers = stmt.all();
 
-      const enriched = students.map(st => {
-        const days = calculateDaysEnrolled(st.joining_date);
+      const enriched = rawUsers.map(st => {
+        const formatted = formatUserResponse(st);
+
+        if (formatted.user_type === 'employee') {
+          return {
+            ...formatted,
+            current_task_title: formatted.designation || 'GrowthNest Staff',
+            current_task_status: formatted.salary_status === 'PAID' ? 'APPROVED' : 'IN_PROGRESS',
+            completed_count: 0,
+            pending_count: 0
+          };
+        }
+
         const curStmt = db.prepare(`
           SELECT sp.status, t.title as task_title, t.sequence_order
           FROM student_progress sp
@@ -828,8 +876,7 @@ const requestHandler = async (req, res) => {
         const pending = pendingStmt.get(st.id);
 
         return {
-          ...st,
-          days_enrolled: days,
+          ...formatted,
           current_task_title: cur ? cur.task_title : 'Task 1: HTML Semantic Resume',
           current_task_status: cur ? cur.status : 'IN_PROGRESS',
           completed_count: comp ? comp.count : 0,
@@ -847,11 +894,23 @@ const requestHandler = async (req, res) => {
       const studentId = Number(parsedUrl.searchParams.get('student_id'));
       if (!studentId) return sendJson(res, { error: 'student_id query parameter is required' }, 400);
 
-      const studentStmt = db.prepare(`SELECT id, username, full_name, email, phone, joining_date, course_track, avatar_url FROM users WHERE id = ?`);
-      const student = studentStmt.get(studentId);
-      if (!student) return sendJson(res, { error: 'Student not found' }, 404);
+      const studentStmt = db.prepare(`SELECT * FROM users WHERE id = ?`);
+      const rawUser = studentStmt.get(studentId);
+      if (!rawUser) return sendJson(res, { error: 'User not found' }, 404);
 
-      student.days_enrolled = calculateDaysEnrolled(student.joining_date);
+      const student = formatUserResponse(rawUser);
+
+      if (student.user_type === 'employee') {
+        return sendJson(res, {
+          student,
+          submissions: [],
+          pending_submission: null,
+          roadmap: [],
+          total_tasks: 0,
+          completed_tasks: 0,
+          pending_count: 0
+        });
+      }
 
       const subsStmt = db.prepare(`
         SELECT s.*, t.title as task_title, t.module as task_module, t.sequence_order, t.description as task_desc, t.instructions as task_inst, t.requirements_json
@@ -900,42 +959,173 @@ const requestHandler = async (req, res) => {
     }
 
     // ------------------------------------------------------------------------
-    // API: Admin Create Student
+    // API: Admin Create Member (Student, Intern, or Employee)
     // ------------------------------------------------------------------------
     if (pathname === '/api/admin/students' && req.method === 'POST') {
-      const { username, password, full_name, email, phone, joining_date, course_track } = await parseJsonBody(req);
+      const body = await parseJsonBody(req);
+      const {
+        username,
+        password,
+        full_name,
+        email,
+        phone,
+        joining_date,
+        user_type,
+        course_track,
+        designation,
+        department,
+        total_fees,
+        fees_paid,
+        fees_status,
+        fees_due_date,
+        payment_notes,
+        salary_amount,
+        salary_status,
+        salary_date,
+        payment_mode,
+        salary_notes
+      } = body;
 
       if (!username || !password || !full_name || !joining_date) {
         return sendJson(res, { error: 'Username, password, full name, and joining date are required' }, 400);
       }
 
       const passHash = sha256(password);
+      const assignedType = user_type || 'student';
+      const track = course_track || (assignedType === 'intern' ? 'Frontend Engineering Internship' : 'Frontend Web Development (HTML/CSS/JS)');
+
+      const tFees = Number(total_fees || 0);
+      const pFees = Number(fees_paid || 0);
+      let fStatus = fees_status;
+      if (!fStatus) {
+        if (tFees === 0) fStatus = 'PAID';
+        else if (pFees >= tFees) fStatus = 'PAID';
+        else if (pFees > 0) fStatus = 'PARTIAL';
+        else fStatus = 'PENDING';
+      }
+
+      const sAmount = Number(salary_amount || 0);
+      const sStatus = salary_status || 'PENDING';
 
       try {
         const stmt = db.prepare(`
-          INSERT INTO users (username, password_hash, role, full_name, email, phone, joining_date, course_track)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO users (
+            username, password_hash, role, user_type, full_name, email, phone, joining_date, course_track,
+            designation, department, total_fees, fees_paid, fees_status, fees_due_date, payment_notes,
+            salary_amount, salary_status, salary_date, payment_mode, salary_notes
+          ) VALUES (?, ?, 'student', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
         const result = stmt.run(
           username,
           passHash,
-          'student',
+          assignedType,
           full_name,
           email || '',
           phone || '',
           joining_date,
-          course_track || 'Frontend Web Development (HTML/CSS/JS)'
+          track,
+          designation || '',
+          department || '',
+          tFees,
+          pFees,
+          fStatus,
+          fees_due_date || '',
+          payment_notes || '',
+          sAmount,
+          sStatus,
+          salary_date || '',
+          payment_mode || 'Bank Transfer',
+          salary_notes || ''
         );
-        const studentId = Number(result.lastInsertRowid);
+        const memberId = Number(result.lastInsertRowid);
 
-        // Unlock Task 1 (HTML)
-        const progStmt = db.prepare(`INSERT INTO student_progress (student_id, current_task_id, status) VALUES (?, 1, 'IN_PROGRESS')`);
-        progStmt.run(studentId);
+        if (assignedType !== 'employee') {
+          const progStmt = db.prepare(`INSERT INTO student_progress (student_id, current_task_id, status) VALUES (?, 1, 'IN_PROGRESS')`);
+          progStmt.run(memberId);
+        }
 
-        return sendJson(res, { success: true, student_id: studentId, message: 'Student registered successfully!' });
+        const label = assignedType === 'intern' ? 'Intern' : (assignedType === 'employee' ? 'Employee / Staff' : 'Student');
+        return sendJson(res, { success: true, student_id: memberId, message: `${label} "${full_name}" registered successfully!` });
       } catch (err) {
-        return sendJson(res, { error: 'Failed to create student: ' + err.message }, 400);
+        return sendJson(res, { error: 'Failed to create member: ' + err.message }, 400);
       }
+    }
+
+    // ------------------------------------------------------------------------
+    // API: Admin Update Student / Intern Fees
+    // ------------------------------------------------------------------------
+    if (pathname === '/api/admin/update-fees' && req.method === 'POST') {
+      const { student_id, total_fees, fees_paid, fees_status, fees_due_date, payment_notes } = await parseJsonBody(req);
+      if (!student_id) return sendJson(res, { error: 'student_id is required' }, 400);
+
+      const tFees = Number(total_fees || 0);
+      const pFees = Number(fees_paid || 0);
+      let status = fees_status;
+      if (!status) {
+        if (tFees === 0) status = 'PAID';
+        else if (pFees >= tFees) status = 'PAID';
+        else if (pFees > 0) status = 'PARTIAL';
+        else status = 'PENDING';
+      }
+
+      db.prepare(`
+        UPDATE users 
+        SET total_fees = ?, fees_paid = ?, fees_status = ?, fees_due_date = ?, payment_notes = ?
+        WHERE id = ?
+      `).run(tFees, pFees, status, fees_due_date || '', payment_notes || '', Number(student_id));
+
+      return sendJson(res, {
+        success: true,
+        message: 'Fee details updated successfully!',
+        fees: {
+          total_fees: tFees,
+          fees_paid: pFees,
+          pending_fees: Math.max(0, tFees - pFees),
+          fees_status: status,
+          fees_due_date: fees_due_date || '',
+          payment_notes: payment_notes || ''
+        }
+      });
+    }
+
+    // ------------------------------------------------------------------------
+    // API: Admin Update Staff Salary
+    // ------------------------------------------------------------------------
+    if (pathname === '/api/admin/update-salary' && req.method === 'POST') {
+      const { employee_id, designation, department, salary_amount, salary_status, salary_date, payment_mode, salary_notes } = await parseJsonBody(req);
+      if (!employee_id) return sendJson(res, { error: 'employee_id is required' }, 400);
+
+      const sAmount = Number(salary_amount || 0);
+      const sStatus = salary_status || 'PENDING';
+
+      db.prepare(`
+        UPDATE users 
+        SET designation = ?, department = ?, salary_amount = ?, salary_status = ?, salary_date = ?, payment_mode = ?, salary_notes = ?
+        WHERE id = ?
+      `).run(
+        designation || '',
+        department || '',
+        sAmount,
+        sStatus,
+        salary_date || '',
+        payment_mode || 'Bank Transfer',
+        salary_notes || '',
+        Number(employee_id)
+      );
+
+      return sendJson(res, {
+        success: true,
+        message: 'Staff salary details updated successfully!',
+        salary: {
+          designation: designation || '',
+          department: department || '',
+          salary_amount: sAmount,
+          salary_status: sStatus,
+          salary_date: salary_date || '',
+          payment_mode: payment_mode || 'Bank Transfer',
+          salary_notes: salary_notes || ''
+        }
+      });
     }
 
     // ------------------------------------------------------------------------

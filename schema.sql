@@ -8,11 +8,24 @@ CREATE TABLE IF NOT EXISTS users (
   username TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   role TEXT NOT NULL CHECK(role IN ('admin', 'student')),
+  user_type TEXT NOT NULL DEFAULT 'student', -- 'student' (Course Student), 'intern' (Intern), 'employee' (Staff/Employee)
   full_name TEXT NOT NULL,
   email TEXT,
   phone TEXT,
   joining_date TEXT NOT NULL,
   course_track TEXT NOT NULL DEFAULT 'Frontend Web Development (HTML/CSS/JS)',
+  designation TEXT DEFAULT '',
+  department TEXT DEFAULT '',
+  total_fees REAL DEFAULT 0,
+  fees_paid REAL DEFAULT 0,
+  fees_status TEXT DEFAULT 'PENDING', -- 'PAID', 'PARTIAL', 'PENDING'
+  fees_due_date TEXT DEFAULT '',
+  payment_notes TEXT DEFAULT '',
+  salary_amount REAL DEFAULT 0,
+  salary_status TEXT DEFAULT 'PENDING', -- 'PAID', 'PENDING', 'PROCESSING'
+  salary_date TEXT DEFAULT '',
+  payment_mode TEXT DEFAULT '',
+  salary_notes TEXT DEFAULT '',
   avatar_url TEXT,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP

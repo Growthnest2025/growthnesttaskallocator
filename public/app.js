@@ -30,6 +30,7 @@ const app = {
   allStudents: [],
   selectedStudentId: null,
   selectedStudentPortfolio: null,
+  adminCategoryFilter: 'all', // 'all', 'student', 'intern', 'employee'
   sidebarFilter: 'all', // 'all', 'pending', 'completed'
   sidebarSearch: '',
   adminMobileTab: 'students', // 'students' or 'workspace' (responsive mobile tabs)
@@ -388,9 +389,114 @@ const app = {
     if (!this.currentUser) return this.showHome();
     if (this.currentUser.role === 'admin') {
       await this.loadAdminPortal();
+    } else if (this.currentUser.user_type === 'employee') {
+      await this.loadStaffPortal();
     } else {
       await this.loadStudentPortal();
     }
+  },
+
+  // --------------------------------------------------------------------------
+  // STAFF / EMPLOYEE PORTAL
+  // --------------------------------------------------------------------------
+  async loadStaffPortal() {
+    this.currentView = 'staff-portal';
+    this.renderStaffPortal();
+  },
+
+  renderStaffPortal() {
+    const main = document.getElementById('appRoot');
+    const u = this.currentUser;
+    const salaryStatus = u.salary_status || 'PENDING';
+
+    main.innerHTML = `
+      <!-- Staff Profile Hero -->
+      <div class="student-hero-banner">
+        <div style="display:flex; align-items:center; gap:14px;">
+          <div class="student-avatar-wrapper" onclick="document.getElementById('avatarFileInput').click()" title="Click to upload profile photo">
+            ${u.avatar_url ? `
+              <img src="${u.avatar_url}" alt="Profile" class="student-avatar-img">
+            ` : `
+              <div class="student-avatar" style="width:52px; height:52px; font-size:18px; background:#eff6ff; color:#1e40af; border-color:#bfdbfe;">
+                ${this.getInitials(u.full_name)}
+              </div>
+            `}
+            <div class="avatar-camera-pill" title="Upload Photo">📷</div>
+            <input type="file" id="avatarFileInput" accept="image/*" style="display:none;" onchange="app.handleAvatarUpload(event)">
+          </div>
+          <div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <h2 style="font-size:20px; font-weight:800; color:var(--dark-navy);">${this.escape(u.full_name)}</h2>
+              <span class="badge-role badge-employee">👔 Staff / Employee</span>
+            </div>
+            <div style="font-size:13px; color:var(--text-muted); display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:2px;">
+              <span>@${this.escape(u.username)}</span>
+              <span>&bull;</span>
+              <span>💼 ${this.escape(u.designation || 'Staff')}</span>
+              <span>&bull;</span>
+              <span>🏢 ${this.escape(u.department || 'GrowthNest')}</span>
+              <span>&bull;</span>
+              <span style="color:#2563eb; font-weight:700;">⏱️ Day ${u.days_enrolled}</span>
+              <span>&bull;</span>
+              <button type="button" class="btn btn-outline" style="padding:1px 8px; font-size:11px; height:auto; line-height:1.4; border-radius:12px;" onclick="document.getElementById('avatarFileInput').click()">📷 Change Photo</button>
+            </div>
+          </div>
+        </div>
+        <div style="text-align:right;">
+          <div style="font-size:12px; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Role</div>
+          <div style="font-size:18px; font-weight:800; color:#1e40af;">${this.escape(u.designation || 'Staff')}</div>
+        </div>
+      </div>
+
+      <!-- Salary & Compensation Card -->
+      <div class="salary-summary-card accent-indigo">
+        <div class="summary-card-header">
+          <div class="summary-card-title">
+            <span>💰</span>
+            <span>My Compensation & Salary Record</span>
+            <span class="status-pill status-${salaryStatus.toLowerCase()}">${salaryStatus}</span>
+          </div>
+          <div style="font-size:12.5px; color:#64748b;">
+            Last Updated: <strong>${u.salary_date || 'Current Month'}</strong>
+          </div>
+        </div>
+
+        <div class="financial-grid-4">
+          <div class="financial-box">
+            <span class="financial-lbl">Monthly Salary</span>
+            <span class="financial-val" style="color:#1e40af;">₹${Number(u.salary_amount || 0).toLocaleString()}</span>
+          </div>
+          <div class="financial-box">
+            <span class="financial-lbl">Payout Status</span>
+            <span class="financial-val ${salaryStatus === 'PAID' ? 'val-green' : 'val-amber'}">${salaryStatus}</span>
+          </div>
+          <div class="financial-box">
+            <span class="financial-lbl">Payout Date</span>
+            <span class="financial-val" style="font-size:15px;">${u.salary_date || '—'}</span>
+          </div>
+          <div class="financial-box">
+            <span class="financial-lbl">Payment Mode</span>
+            <span class="financial-val" style="font-size:15px;">${this.escape(u.payment_mode || 'Bank Transfer')}</span>
+          </div>
+        </div>
+
+        ${u.salary_notes ? `
+          <div class="financial-notes-bar">
+            <strong>Salary Remarks:</strong> <span>${this.escape(u.salary_notes)}</span>
+          </div>
+        ` : ''}
+      </div>
+
+      <!-- Staff Hub / Guidelines -->
+      <div class="card" style="margin-top:20px;">
+        <h3 style="font-size:16px; font-weight:800; color:var(--dark-navy); margin-bottom:12px;">
+          🏢 GrowthNest Tech Solutions Employee Dashboard
+        </h3>
+        <p style="font-size:13.5px; color:#475569; line-height:1.6;">
+          Welcome to your GrowthNest staff portal. Your salary disbursements, designation, and company profile are managed here. For questions regarding payroll, advances, or training batch allocations, please reach out directly to the administrator.
+        </p>
+      </div>
+    `;
   },
 
   // --------------------------------------------------------------------------
@@ -425,6 +531,7 @@ const app = {
     const main = document.getElementById('appRoot');
     const u = this.currentUser;
     const task = this.roadmap.find(t => t.id === this.selectedTaskId) || this.roadmap[0];
+    const isIntern = u.user_type === 'intern';
 
     main.innerHTML = `
       <!-- Student Profile & Progress Banner -->
@@ -442,13 +549,16 @@ const app = {
             <input type="file" id="avatarFileInput" accept="image/*" style="display:none;" onchange="app.handleAvatarUpload(event)">
           </div>
           <div>
-            <h2 style="font-size:20px; font-weight:800; color:var(--dark-navy);">${this.escape(u.full_name)}</h2>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <h2 style="font-size:20px; font-weight:800; color:var(--dark-navy);">${this.escape(u.full_name)}</h2>
+              ${isIntern ? '<span class="badge-role badge-intern">💼 Intern</span>' : '<span class="badge-role badge-student">🎓 Student</span>'}
+            </div>
             <div style="font-size:13px; color:var(--text-muted); display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:2px;">
               <span>@${this.escape(u.username)}</span>
               <span>&bull;</span>
               <span style="color:var(--emerald-dark); font-weight:700;">⏱️ Day ${u.days_enrolled}</span>
               <span>&bull;</span>
-              <span>${this.escape(u.course_track || 'Frontend Development')}</span>
+              <span>${this.escape(u.course_track || (isIntern ? 'Frontend Internship' : 'Frontend Development'))}</span>
               <span>&bull;</span>
               <button type="button" class="btn btn-outline" style="padding:1px 8px; font-size:11px; height:auto; line-height:1.4; border-radius:12px;" onclick="document.getElementById('avatarFileInput').click()">📷 Change Photo</button>
             </div>
@@ -458,6 +568,55 @@ const app = {
           <div style="font-size:12px; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Curriculum</div>
           <div style="font-size:20px; font-weight:800; color:var(--emerald-dark);">${data.completed_tasks} / ${data.total_tasks} <span style="font-size:13px; font-weight:600; color:var(--text-muted);">Tasks</span></div>
         </div>
+      </div>
+
+      <!-- Student's Own Fees Status Card -->
+      <div class="fees-summary-card accent-emerald" style="margin-bottom:16px;">
+        <div class="summary-card-header">
+          <div class="summary-card-title">
+            <span>💳</span>
+            <span>Fee & Payment Status (${isIntern ? 'Internship Track' : 'Course Training'})</span>
+            <span class="status-pill status-${(u.fees_status || 'PENDING').toLowerCase()}">${u.fees_status || 'PENDING'}</span>
+          </div>
+          ${u.pending_fees > 0 ? `
+            <span style="font-size:12px; color:#b91c1c; font-weight:700;">
+              ⚠️ ₹${Number(u.pending_fees || 0).toLocaleString()} Pending ${u.fees_due_date ? `(Due: ${u.fees_due_date})` : ''}
+            </span>
+          ` : `
+            <span style="font-size:12px; color:#15803d; font-weight:700;">
+              ✓ All fees fully cleared
+            </span>
+          `}
+        </div>
+
+        <div class="financial-grid-4">
+          <div class="financial-box">
+            <span class="financial-lbl">Total Fees</span>
+            <span class="financial-val">₹${Number(u.total_fees || 0).toLocaleString()}</span>
+          </div>
+          <div class="financial-box">
+            <span class="financial-lbl">Amount Paid</span>
+            <span class="financial-val val-green">₹${Number(u.fees_paid || 0).toLocaleString()}</span>
+          </div>
+          <div class="financial-box">
+            <span class="financial-lbl">Balance Due</span>
+            <span class="financial-val ${u.pending_fees > 0 ? 'val-red' : 'val-green'}">
+              ₹${Number(u.pending_fees || 0).toLocaleString()}
+            </span>
+          </div>
+          <div class="financial-box">
+            <span class="financial-lbl">Payment Status</span>
+            <span class="financial-val" style="font-size:15px; color:${u.fees_status === 'PAID' ? '#15803d' : '#b45309'};">
+              ${u.fees_status || 'PENDING'}
+            </span>
+          </div>
+        </div>
+
+        ${u.payment_notes ? `
+          <div class="financial-notes-bar">
+            <strong>Payment Info:</strong> <span>${this.escape(u.payment_notes)}</span>
+          </div>
+        ` : ''}
       </div>
 
       <!-- Progressive 23-Task Stepper Strip -->
@@ -950,6 +1109,11 @@ const app = {
     this.renderAdminPortal();
   },
 
+  setAdminCategoryFilter(category) {
+    this.adminCategoryFilter = category;
+    this.renderAdminPortal();
+  },
+
   handleSidebarSearch(e) {
     this.sidebarSearch = e.target.value.toLowerCase();
     this.renderAdminPortal();
@@ -959,6 +1123,10 @@ const app = {
     const main = document.getElementById('appRoot');
     const stats = this.adminStats || { total_students: 0, pending_reviews: 0, approved_tasks: 0, rejected_tasks: 0 };
 
+    const courseStudentsCount = this.allStudents.filter(s => (s.user_type || 'student') === 'student').length;
+    const internsCount = this.allStudents.filter(s => s.user_type === 'intern').length;
+    const employeesCount = this.allStudents.filter(s => s.user_type === 'employee').length;
+
     // Filter students for sidebar
     const filteredStudents = this.allStudents.filter(s => {
       const matchesSearch = !this.sidebarSearch
@@ -966,6 +1134,11 @@ const app = {
         || s.username.toLowerCase().includes(this.sidebarSearch);
 
       if (!matchesSearch) return false;
+
+      const userType = s.user_type || 'student';
+      if (this.adminCategoryFilter !== 'all' && userType !== this.adminCategoryFilter) {
+        return false;
+      }
 
       if (this.sidebarFilter === 'pending') {
         return s.pending_count > 0;
@@ -984,21 +1157,37 @@ const app = {
           <img src="logo.png" alt="GrowthNest Logo" style="height:44px; width:auto; border-radius:6px;">
           <div>
             <h2 style="font-size:22px; font-weight:800; color:var(--dark-navy);">GrowthNest Admin & Mentor Hub</h2>
-            <p style="font-size:13px; color:var(--text-muted);">Master-Detail Student Task Evaluation & Real-Time Tracking</p>
+            <p style="font-size:13px; color:var(--text-muted);">Master-Detail Student Task Evaluation, Fees & Staff Payroll</p>
           </div>
         </div>
         <button class="btn btn-primary" onclick="app.openModal('addStudentModal')">
-          ➕ Enroll New Student
+          ➕ Add Member (Student / Intern / Staff)
         </button>
       </div>
 
       <!-- Real KPI Stats Bar -->
       <div class="admin-stats-strip">
         <div class="stat-metric-card">
-          <div class="stat-metric-icon" style="background:var(--emerald-light); color:var(--emerald-deep);">👥</div>
+          <div class="stat-metric-icon" style="background:var(--emerald-light); color:var(--emerald-deep);">🎓</div>
           <div>
-            <div class="stat-metric-val">${stats.total_students}</div>
-            <div class="stat-metric-lbl">Total Students</div>
+            <div class="stat-metric-val">${stats.total_course_students ?? courseStudentsCount}</div>
+            <div class="stat-metric-lbl">Course Students</div>
+          </div>
+        </div>
+
+        <div class="stat-metric-card">
+          <div class="stat-metric-icon" style="background:var(--gold-light); color:var(--gold-deep);">💼</div>
+          <div>
+            <div class="stat-metric-val">${stats.total_interns ?? internsCount}</div>
+            <div class="stat-metric-lbl">Interns Enrolled</div>
+          </div>
+        </div>
+
+        <div class="stat-metric-card">
+          <div class="stat-metric-icon" style="background:#eff6ff; color:#1d4ed8;">👔</div>
+          <div>
+            <div class="stat-metric-val">${stats.total_employees ?? employeesCount}</div>
+            <div class="stat-metric-lbl">Staff / Employees</div>
           </div>
         </div>
 
@@ -1013,18 +1202,18 @@ const app = {
         </div>
 
         <div class="stat-metric-card">
-          <div class="stat-metric-icon" style="background:var(--success-bg); color:var(--emerald-deep);">✓</div>
+          <div class="stat-metric-icon" style="background:#dcfce7; color:#15803d;">💰</div>
           <div>
-            <div class="stat-metric-val">${stats.approved_tasks}</div>
-            <div class="stat-metric-lbl">Approved Tasks</div>
+            <div class="stat-metric-val" style="font-size:16px; color:#15803d;">₹${Number(stats.total_fees_paid || 0).toLocaleString()}</div>
+            <div class="stat-metric-lbl">Fees Collected (₹${Number(stats.total_pending_fees || 0).toLocaleString()} Due)</div>
           </div>
         </div>
 
         <div class="stat-metric-card">
-          <div class="stat-metric-icon" style="background:var(--danger-bg); color:var(--danger);">⚠️</div>
+          <div class="stat-metric-icon" style="background:#e0e7ff; color:#4338ca;">💳</div>
           <div>
-            <div class="stat-metric-val">${stats.rejected_tasks}</div>
-            <div class="stat-metric-lbl">Revisions Requested</div>
+            <div class="stat-metric-val" style="font-size:16px; color:#4338ca;">₹${Number(stats.total_salary || 0).toLocaleString()}</div>
+            <div class="stat-metric-lbl">Monthly Staff Payroll</div>
           </div>
         </div>
       </div>
@@ -1032,28 +1221,44 @@ const app = {
       <!-- Mobile View Switcher (Only visible on screens <= 860px) -->
       <div class="admin-mobile-nav-bar">
         <button class="mobile-nav-btn ${this.adminMobileTab === 'students' ? 'active' : ''}" onclick="app.setAdminMobileTab('students')">
-          👥 Students (${this.allStudents.length})
+          👥 Members (${this.allStudents.length})
         </button>
         <button class="mobile-nav-btn ${this.adminMobileTab === 'workspace' ? 'active' : ''}" onclick="app.setAdminMobileTab('workspace')">
-          📁 ${this.selectedStudentPortfolio && this.selectedStudentPortfolio.student ? this.escape(this.selectedStudentPortfolio.student.full_name) : 'Student Workspace'}
+          📁 ${this.selectedStudentPortfolio && this.selectedStudentPortfolio.student ? this.escape(this.selectedStudentPortfolio.student.full_name) : 'Member Workspace'}
           ${(this.selectedStudentPortfolio && this.selectedStudentPortfolio.pending_count > 0) ? `<span class="notif-badge-pill" style="margin-left:4px;">🔔</span>` : ''}
         </button>
       </div>
 
-      <!-- 2-Column Responsive Workspace: Side Dashboard + Individual Student View -->
+      <!-- 2-Column Responsive Workspace: Side Dashboard + Individual Member View -->
       <div class="admin-workspace-grid">
-        <!-- LEFT COLUMN: Side Dashboard (Students List with Notifications) -->
+        <!-- LEFT COLUMN: Side Dashboard (Members List with Notifications) -->
         <aside class="admin-sidebar-panel ${this.adminMobileTab === 'workspace' ? 'mobile-tab-hidden' : ''}">
           <div class="sidebar-header-row">
-            <h3>👥 Students Directory</h3>
-            <span style="font-size:12px; font-weight:700; color:var(--text-muted);">${this.allStudents.length} Enrolled</span>
+            <h3>👥 Directory</h3>
+            <span style="font-size:12px; font-weight:700; color:var(--text-muted);">${this.allStudents.length} Total</span>
           </div>
 
-          <input type="text" class="sidebar-search-box" placeholder="🔍 Search student name..." value="${this.escape(this.sidebarSearch)}" oninput="app.handleSidebarSearch(event)">
+          <input type="text" class="sidebar-search-box" placeholder="🔍 Search name or username..." value="${this.escape(this.sidebarSearch)}" oninput="app.handleSidebarSearch(event)">
+
+          <!-- Member Category Filters: All, Students, Interns, Employees -->
+          <div class="sidebar-filter-tabs" style="margin-bottom:8px;">
+            <button class="filter-tab-pill ${this.adminCategoryFilter === 'all' ? 'active' : ''}" onclick="app.setAdminCategoryFilter('all')">
+              All (${this.allStudents.length})
+            </button>
+            <button class="filter-tab-pill ${this.adminCategoryFilter === 'student' ? 'active' : ''}" onclick="app.setAdminCategoryFilter('student')">
+              🎓 Students (${courseStudentsCount})
+            </button>
+            <button class="filter-tab-pill ${this.adminCategoryFilter === 'intern' ? 'active' : ''}" onclick="app.setAdminCategoryFilter('intern')">
+              💼 Interns (${internsCount})
+            </button>
+            <button class="filter-tab-pill ${this.adminCategoryFilter === 'employee' ? 'active' : ''}" onclick="app.setAdminCategoryFilter('employee')">
+              👔 Staff (${employeesCount})
+            </button>
+          </div>
 
           <div class="sidebar-filter-tabs">
             <button class="filter-tab-pill ${this.sidebarFilter === 'all' ? 'active' : ''}" onclick="app.setSidebarFilter('all')">
-              All (${this.allStudents.length})
+              All Status
             </button>
             <button class="filter-tab-pill ${this.sidebarFilter === 'pending' ? 'active' : ''}" onclick="app.setSidebarFilter('pending')" style="${pendingTotal > 0 ? 'color:var(--gold-deep); font-weight:800;' : ''}">
               🔔 Needs Review (${pendingTotal})
@@ -1063,15 +1268,17 @@ const app = {
             </button>
           </div>
 
-          <!-- Students List -->
+          <!-- Members List -->
           <div class="admin-students-list">
             ${filteredStudents.length === 0 ? `
               <div style="text-align:center; padding:24px; color:var(--text-muted); font-size:13px;">
-                No students match your filter.
+                No members match your filter.
               </div>
             ` : filteredStudents.map(s => {
               const isSelected = s.id === this.selectedStudentId;
               const hasPending = s.pending_count > 0;
+              const isEmp = s.user_type === 'employee';
+              const isInt = s.user_type === 'intern';
 
               return `
                 <div class="student-card-item ${isSelected ? 'selected' : ''}" onclick="app.selectStudentAndReview(${s.id})">
@@ -1080,12 +1287,16 @@ const app = {
                       ${s.avatar_url ? `
                         <img src="${s.avatar_url}" alt="" class="student-avatar-img" style="width:38px; height:38px;">
                       ` : `
-                        <div class="student-avatar">
+                        <div class="student-avatar" style="${isEmp ? 'background:#eff6ff; color:#1e40af; border-color:#bfdbfe;' : ''}">
                           ${this.getInitials(s.full_name)}
                         </div>
                       `}
                       <div>
-                        <div class="student-name-text">${this.escape(s.full_name)}</div>
+                        <div class="student-name-text" style="display:flex; align-items:center; gap:6px;">
+                          <span>${this.escape(s.full_name)}</span>
+                          ${isInt ? '<span class="badge-role badge-intern" style="font-size:9.5px; padding:1px 5px;">Intern</span>' : ''}
+                          ${isEmp ? '<span class="badge-role badge-employee" style="font-size:9.5px; padding:1px 5px;">Staff</span>' : ''}
+                        </div>
                         <div class="student-username-text">@${this.escape(s.username)}</div>
                       </div>
                     </div>
@@ -1097,27 +1308,134 @@ const app = {
                     ` : ''}
                   </div>
 
-                  <div class="student-meta-strip">
-                    <span>🗓️ Day ${s.days_enrolled} (${s.joining_date})</span>
-                    <span style="font-weight:700; color:var(--emerald-dark);">${s.completed_count}/23 Tasks</span>
-                  </div>
-
-                  <div style="font-size:11px; color:#475569; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
-                    📌 ${this.escape(s.current_task_title || 'Task 1')}
-                  </div>
+                  ${isEmp ? `
+                    <div class="student-meta-strip">
+                      <span>💼 ${this.escape(s.designation || 'Staff')}</span>
+                      <span style="font-weight:700; color:#1d4ed8;">${this.escape(s.department || 'GrowthNest')}</span>
+                    </div>
+                    <div style="font-size:11px; color:#475569; display:flex; justify-content:space-between; align-items:center;">
+                      <span>💰 ₹${Number(s.salary_amount || 0).toLocaleString()} /mo</span>
+                      <span class="status-pill status-${(s.salary_status || 'PENDING').toLowerCase()}" style="font-size:9.5px; padding:1px 6px;">Salary: ${s.salary_status || 'PENDING'}</span>
+                    </div>
+                  ` : `
+                    <div class="student-meta-strip">
+                      <span>🗓️ Day ${s.days_enrolled} (${s.joining_date})</span>
+                      <span style="font-weight:700; color:var(--emerald-dark);">${s.completed_count}/23 Tasks</span>
+                    </div>
+                    <div style="font-size:11px; color:#475569; display:flex; justify-content:space-between; align-items:center;">
+                      <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:60%;">📌 ${this.escape(s.current_task_title || 'Task 1')}</span>
+                      <span class="status-pill status-${(s.fees_status || 'PENDING').toLowerCase()}" style="font-size:9.5px; padding:1px 6px;">Fees: ${s.fees_status || 'PENDING'}</span>
+                    </div>
+                  `}
                 </div>
               `;
             }).join('')}
           </div>
         </aside>
 
-        <!-- RIGHT COLUMN: Dedicated Student Workspace (Per-Student View) -->
+        <!-- RIGHT COLUMN: Dedicated Workspace (Per-Member View) -->
         <section id="studentWorkspace" class="admin-detail-panel ${this.adminMobileTab === 'students' ? 'mobile-tab-hidden' : ''}">
           <button class="mobile-back-to-list-btn" onclick="app.setAdminMobileTab('students')">
-            &larr; Back to Students Directory
+            &larr; Back to Directory
           </button>
           ${this.renderStudentWorkspace()}
         </section>
+      </div>
+    `;
+  },
+
+  renderEmployeeWorkspace(emp) {
+    const salaryStatus = emp.salary_status || 'PENDING';
+    return `
+      <!-- Employee Banner Card -->
+      <div class="student-profile-hero">
+        <div class="profile-top-bar">
+          <div style="display:flex; align-items:center; gap:14px;">
+            ${emp.avatar_url ? `
+              <img src="${emp.avatar_url}" alt="" class="student-avatar-img" style="width:48px; height:48px;">
+            ` : `
+              <div class="student-avatar" style="width:48px; height:48px; font-size:17px; background:#eff6ff; color:#1e40af; border-color:#bfdbfe;">
+                ${this.getInitials(emp.full_name)}
+              </div>
+            `}
+            <div>
+              <div style="display:flex; align-items:center; gap:10px;">
+                <h2 style="font-size:20px; font-weight:800; color:var(--dark-navy);">${this.escape(emp.full_name)}</h2>
+                <span class="badge-role badge-employee">👔 Staff / Employee</span>
+                <span class="user-tag" style="background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe;">@${this.escape(emp.username)}</span>
+              </div>
+              <div style="font-size:12.5px; color:var(--text-muted); display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:3px;">
+                <span>💼 Designation: <strong>${this.escape(emp.designation || 'Staff')}</strong></span>
+                <span>&bull;</span>
+                <span>🏢 Dept: <strong>${this.escape(emp.department || 'GrowthNest')}</strong></span>
+                <span>&bull;</span>
+                <span>📅 Joined: <strong>${emp.joining_date}</strong></span>
+                <span>&bull;</span>
+                <span style="color:#2563eb; font-weight:700;">⏱️ Service: ${emp.days_enrolled} Days</span>
+                <span>&bull;</span>
+                <button type="button" class="btn btn-outline" style="padding:2px 8px; font-size:11px; height:auto; line-height:1.4; border-color:#cbd5e1; color:#334155;" onclick="app.promptResetPassword(${emp.id}, '${this.escape(emp.username)}')">🔑 Reset Password</button>
+                <span>&bull;</span>
+                <button type="button" class="btn btn-danger" style="padding:2px 8px; font-size:11px; height:auto; line-height:1.4; background:#fef2f2; border:1px solid #fecaca; color:#dc2626;" onclick="app.confirmRemoveStudent(${emp.id}, '${this.escape(emp.full_name)}')">🗑️ Remove Staff</button>
+              </div>
+            </div>
+          </div>
+
+          <div style="text-align:right;">
+            <div style="font-size:12px; color:var(--text-muted); font-weight:600;">Monthly Compensation</div>
+            <div style="font-size:22px; font-weight:800; color:#1e40af;">₹${Number(emp.salary_amount || 0).toLocaleString()}</div>
+            <div style="font-size:11px; color:var(--text-muted);">${this.escape(emp.payment_mode || 'Bank Transfer')}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Employee Salary & Compensation Details Card -->
+      <div class="salary-summary-card accent-indigo">
+        <div class="summary-card-header">
+          <div class="summary-card-title">
+            <span>💰</span>
+            <span>Monthly Salary & Payout Management</span>
+            <span class="status-pill status-${salaryStatus.toLowerCase()}">${salaryStatus}</span>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="app.openUpdateSalaryModal(${emp.id})">
+            ✏️ Update Salary / Mark Paid
+          </button>
+        </div>
+
+        <div class="financial-grid-4">
+          <div class="financial-box">
+            <span class="financial-lbl">Monthly Salary</span>
+            <span class="financial-val" style="color:#1e40af;">₹${Number(emp.salary_amount || 0).toLocaleString()}</span>
+          </div>
+          <div class="financial-box">
+            <span class="financial-lbl">Salary Status</span>
+            <span class="financial-val ${salaryStatus === 'PAID' ? 'val-green' : 'val-amber'}">${salaryStatus}</span>
+          </div>
+          <div class="financial-box">
+            <span class="financial-lbl">Last Payout Date</span>
+            <span class="financial-val" style="font-size:15px;">${emp.salary_date || '—'}</span>
+          </div>
+          <div class="financial-box">
+            <span class="financial-lbl">Payment Mode</span>
+            <span class="financial-val" style="font-size:15px;">${this.escape(emp.payment_mode || 'Bank Transfer')}</span>
+          </div>
+        </div>
+
+        ${emp.salary_notes ? `
+          <div class="financial-notes-bar">
+            <strong>📝 Notes / Bank Account:</strong>
+            <span>${this.escape(emp.salary_notes)}</span>
+          </div>
+        ` : ''}
+      </div>
+
+      <!-- Staff Information Note -->
+      <div class="card" style="background:#f8fafc; border-left:4px solid #3b82f6;">
+        <h3 style="font-size:15px; font-weight:800; color:var(--dark-navy); margin-bottom:6px;">
+          ℹ️ GrowthNest Team Member
+        </h3>
+        <p style="font-size:13px; color:#475569; line-height:1.6; margin:0;">
+          ${this.escape(emp.full_name)} is registered as <strong>${this.escape(emp.designation || 'Staff')}</strong> in the <strong>${this.escape(emp.department || 'GrowthNest')}</strong> department. Staff members have portal access to view their monthly compensation, company announcements, and mentor credentials.
+        </p>
       </div>
     `;
   },
@@ -1127,15 +1445,21 @@ const app = {
       return `
         <div class="card" style="text-align:center; padding:48px 20px;">
           <div style="font-size:36px; margin-bottom:12px;">👈</div>
-          <h3 style="color:var(--dark-navy);">Select a Student from the Side Dashboard</h3>
+          <h3 style="color:var(--dark-navy);">Select a Member from the Directory</h3>
           <p style="color:var(--text-muted); font-size:13.5px; margin-top:4px;">
-            Click any student in the directory to inspect their submitted code, output screenshots, and progress roadmap.
+            Click any student, intern, or staff member in the directory to inspect their details, tasks, fees, or salary.
           </p>
         </div>
       `;
     }
 
     const { student, submissions, pending_submission, roadmap, total_tasks, completed_tasks, pending_count } = this.selectedStudentPortfolio;
+
+    if (student.user_type === 'employee') {
+      return this.renderEmployeeWorkspace(student);
+    }
+
+    const isIntern = student.user_type === 'intern';
     const progressPercent = Math.round((completed_tasks / total_tasks) * 100);
 
     return `
@@ -1153,6 +1477,7 @@ const app = {
             <div>
               <div style="display:flex; align-items:center; gap:10px;">
                 <h2 style="font-size:20px; font-weight:800; color:var(--dark-navy);">${this.escape(student.full_name)}</h2>
+                ${isIntern ? '<span class="badge-role badge-intern">💼 Intern</span>' : '<span class="badge-role badge-student">🎓 Student</span>'}
                 <span class="user-tag" style="background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe;">@${this.escape(student.username)}</span>
               </div>
               <div style="font-size:12.5px; color:var(--text-muted); display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-top:3px;">
@@ -1160,11 +1485,11 @@ const app = {
                 <span>&bull;</span>
                 <span style="color:var(--emerald-dark); font-weight:700;">⏱️ Time Elapsed: ${student.days_enrolled} Days</span>
                 <span>&bull;</span>
-                <span>🎓 ${this.escape(student.course_track || 'Frontend Development')}</span>
+                <span>${this.escape(student.course_track || (isIntern ? 'Frontend Internship' : 'Frontend Development'))}</span>
                 <span>&bull;</span>
                 <button type="button" class="btn btn-outline" style="padding:2px 8px; font-size:11px; height:auto; line-height:1.4; border-color:#cbd5e1; color:#334155;" onclick="app.promptResetPassword(${student.id}, '${this.escape(student.username)}')">🔑 Reset Password</button>
                 <span>&bull;</span>
-                <button type="button" class="btn btn-danger" style="padding:2px 8px; font-size:11px; height:auto; line-height:1.4; background:#fef2f2; border:1px solid #fecaca; color:#dc2626;" onclick="app.confirmRemoveStudent(${student.id}, '${this.escape(student.full_name)}')">🗑️ Remove Student</button>
+                <button type="button" class="btn btn-danger" style="padding:2px 8px; font-size:11px; height:auto; line-height:1.4; background:#fef2f2; border:1px solid #fecaca; color:#dc2626;" onclick="app.confirmRemoveStudent(${student.id}, '${this.escape(student.full_name)}')">🗑️ Remove ${isIntern ? 'Intern' : 'Student'}</button>
               </div>
             </div>
           </div>
@@ -1179,6 +1504,49 @@ const app = {
         <div class="progress-bar-container">
           <div class="progress-bar-fill" style="width: ${progressPercent}%;"></div>
         </div>
+      </div>
+
+      <!-- Fees & Payment Details Card -->
+      <div class="fees-summary-card accent-emerald">
+        <div class="summary-card-header">
+          <div class="summary-card-title">
+            <span>💳</span>
+            <span>Fee & Payment Details (${isIntern ? 'Internship Track' : 'Course Training'})</span>
+            <span class="status-pill status-${(student.fees_status || 'PENDING').toLowerCase()}">${student.fees_status || 'PENDING'}</span>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="app.openUpdateFeesModal(${student.id})">
+            ✏️ Update Fee Record
+          </button>
+        </div>
+
+        <div class="financial-grid-4">
+          <div class="financial-box">
+            <span class="financial-lbl">Total Fees</span>
+            <span class="financial-val">₹${Number(student.total_fees || 0).toLocaleString()}</span>
+          </div>
+          <div class="financial-box">
+            <span class="financial-lbl">Amount Paid</span>
+            <span class="financial-val val-green">₹${Number(student.fees_paid || 0).toLocaleString()}</span>
+          </div>
+          <div class="financial-box">
+            <span class="financial-lbl">Balance Pending</span>
+            <span class="financial-val ${student.pending_fees > 0 ? 'val-red' : 'val-green'}">
+              ₹${Number(student.pending_fees || 0).toLocaleString()}
+            </span>
+          </div>
+          <div class="financial-box">
+            <span class="financial-lbl">Next Due Date</span>
+            <span class="financial-val" style="font-size:15px;">${student.fees_due_date || '—'}</span>
+          </div>
+        </div>
+
+        ${student.payment_notes ? `
+          <div class="financial-notes-bar">
+            <strong>📝 Payment Notes / Ref:</strong>
+            <span>${this.escape(student.payment_notes)}</span>
+          </div>
+        ` : ''}
+      </div>
       </div>
 
       <!-- ACTIVE SUBMISSION AWAITING REVIEW (If student has a pending task) -->
@@ -1503,12 +1871,275 @@ const app = {
     });
   },
 
+  switchMemberTab(type) {
+    const typeInput = document.getElementById('addMemberType');
+    if (typeInput) typeInput.value = type;
+
+    // Toggle button active classes
+    const tabStudent = document.getElementById('tabTypeStudent');
+    const tabIntern = document.getElementById('tabTypeIntern');
+    const tabEmployee = document.getElementById('tabTypeEmployee');
+    if (tabStudent) tabStudent.classList.toggle('active', type === 'student');
+    if (tabIntern) tabIntern.classList.toggle('active', type === 'intern');
+    if (tabEmployee) tabEmployee.classList.toggle('active', type === 'employee');
+
+    // Toggle form sections
+    const secStudent = document.getElementById('studentFieldsSection');
+    const secIntern = document.getElementById('internFieldsSection');
+    const secEmployee = document.getElementById('employeeFieldsSection');
+    if (secStudent) secStudent.style.display = type === 'student' ? 'block' : 'none';
+    if (secIntern) secIntern.style.display = type === 'intern' ? 'block' : 'none';
+    if (secEmployee) secEmployee.style.display = type === 'employee' ? 'block' : 'none';
+
+    // Update title, subtitle, icon, and button text
+    const title = document.getElementById('addMemberModalTitle');
+    const sub = document.getElementById('addMemberModalSubtitle');
+    const icon = document.getElementById('addMemberHeaderIcon');
+    const btn = document.getElementById('addMemberSubmitBtn');
+    const dateLabel = document.getElementById('addJoiningDateLabel');
+
+    if (type === 'student') {
+      if (title) title.innerText = 'Enroll Course Student';
+      if (sub) sub.innerText = 'Allocates Task 1 • Begins 23-task daily training track';
+      if (icon) icon.innerText = '🎓';
+      if (btn) btn.innerText = '➕ Enroll Student & Allocate Task 1';
+      if (dateLabel) dateLabel.innerText = 'Joining Date *';
+    } else if (type === 'intern') {
+      if (title) title.innerText = 'Enroll Intern';
+      if (sub) sub.innerText = 'Allocates Task 1 • Begins internship curriculum';
+      if (icon) icon.innerText = '💼';
+      if (btn) btn.innerText = '➕ Enroll Intern & Allocate Task 1';
+      if (dateLabel) dateLabel.innerText = 'Internship Start Date *';
+    } else if (type === 'employee') {
+      if (title) title.innerText = 'Register Employee / Staff';
+      if (sub) sub.innerText = 'Creates staff account with designation & salary';
+      if (icon) icon.innerText = '👔';
+      if (btn) btn.innerText = '➕ Register Staff Member';
+      if (dateLabel) dateLabel.innerText = 'Date of Joining *';
+    }
+  },
+
+  calcAddStudentBalance() {
+    const total = Number(document.getElementById('addStudentTotalFees').value || 0);
+    const paid = Number(document.getElementById('addStudentPaidFees').value || 0);
+    const statusSelect = document.getElementById('addStudentFeesStatus');
+    if (statusSelect) {
+      if (total > 0 && paid >= total) statusSelect.value = 'PAID';
+      else if (paid > 0) statusSelect.value = 'PARTIAL';
+      else statusSelect.value = 'PENDING';
+    }
+  },
+
+  calcAddInternBalance() {
+    const total = Number(document.getElementById('addInternTotalFees').value || 0);
+    const paid = Number(document.getElementById('addInternPaidFees').value || 0);
+    const statusSelect = document.getElementById('addInternFeesStatus');
+    if (statusSelect) {
+      if (total > 0 && paid >= total) statusSelect.value = 'PAID';
+      else if (paid > 0) statusSelect.value = 'PARTIAL';
+      else statusSelect.value = 'PENDING';
+    }
+  },
+
+  calcEditFeeBalance() {
+    const total = Number(document.getElementById('editFeeTotal').value || 0);
+    const paid = Number(document.getElementById('editFeePaid').value || 0);
+    const balance = Math.max(0, total - paid);
+    const balEl = document.getElementById('editFeeBalance');
+    if (balEl) balEl.value = `₹${balance.toLocaleString()}`;
+
+    const statusEl = document.getElementById('editFeeStatus');
+    if (statusEl) {
+      if (total > 0 && paid >= total) statusEl.value = 'PAID';
+      else if (paid > 0) statusEl.value = 'PARTIAL';
+      else statusEl.value = 'PENDING';
+    }
+  },
+
+  openUpdateFeesModal(studentId) {
+    const target = (this.selectedStudentPortfolio && this.selectedStudentPortfolio.student && this.selectedStudentPortfolio.student.id === studentId)
+      ? this.selectedStudentPortfolio.student
+      : this.allStudents.find(s => s.id === studentId);
+
+    if (!target) return;
+
+    document.getElementById('editFeeStudentId').value = target.id;
+    document.getElementById('updateFeesTargetName').innerText = `${target.full_name} (@${target.username})`;
+    document.getElementById('editFeeTotal').value = target.total_fees || 0;
+    document.getElementById('editFeePaid').value = target.fees_paid || 0;
+    document.getElementById('editFeeStatus').value = target.fees_status || 'PENDING';
+    document.getElementById('editFeeDueDate').value = target.fees_due_date || '';
+    document.getElementById('editFeeNotes').value = target.payment_notes || '';
+    this.calcEditFeeBalance();
+
+    this.openModal('updateFeesModal');
+  },
+
+  async handleUpdateFeesSubmit(e) {
+    e.preventDefault();
+    const student_id = Number(document.getElementById('editFeeStudentId').value);
+    const total_fees = Number(document.getElementById('editFeeTotal').value || 0);
+    const fees_paid = Number(document.getElementById('editFeePaid').value || 0);
+    const fees_status = document.getElementById('editFeeStatus').value;
+    const fees_due_date = document.getElementById('editFeeDueDate').value;
+    const payment_notes = document.getElementById('editFeeNotes').value.trim();
+
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/update-fees`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.token}`
+        },
+        body: JSON.stringify({
+          student_id,
+          total_fees,
+          fees_paid,
+          fees_status,
+          fees_due_date,
+          payment_notes
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update fees');
+
+      this.closeModal('updateFeesModal');
+      this.showToast('✓ Fee record updated successfully!', 'success', 'Fees Updated');
+
+      await this.loadAdminPortal();
+      if (this.selectedStudentId === student_id) {
+        await this.selectStudent(student_id);
+      }
+    } catch (err) {
+      this.showToast(err.message, 'error', 'Update Failed');
+    }
+  },
+
+  openUpdateSalaryModal(employeeId) {
+    const target = (this.selectedStudentPortfolio && this.selectedStudentPortfolio.student && this.selectedStudentPortfolio.student.id === employeeId)
+      ? this.selectedStudentPortfolio.student
+      : this.allStudents.find(s => s.id === employeeId);
+
+    if (!target) return;
+
+    document.getElementById('editSalaryEmployeeId').value = target.id;
+    document.getElementById('updateSalaryTargetName').innerText = `${target.full_name} (@${target.username})`;
+    document.getElementById('editSalaryDesignation').value = target.designation || '';
+    document.getElementById('editSalaryDepartment').value = target.department || '';
+    document.getElementById('editSalaryAmount').value = target.salary_amount || 0;
+    document.getElementById('editSalaryStatus').value = target.salary_status || 'PENDING';
+    document.getElementById('editSalaryDate').value = target.salary_date || '';
+    document.getElementById('editSalaryMode').value = target.payment_mode || 'Bank Transfer';
+    document.getElementById('editSalaryNotes').value = target.salary_notes || '';
+
+    this.openModal('updateSalaryModal');
+  },
+
+  async handleUpdateSalarySubmit(e) {
+    e.preventDefault();
+    const employee_id = Number(document.getElementById('editSalaryEmployeeId').value);
+    const designation = document.getElementById('editSalaryDesignation').value.trim();
+    const department = document.getElementById('editSalaryDepartment').value.trim();
+    const salary_amount = Number(document.getElementById('editSalaryAmount').value || 0);
+    const salary_status = document.getElementById('editSalaryStatus').value;
+    const salary_date = document.getElementById('editSalaryDate').value;
+    const payment_mode = document.getElementById('editSalaryMode').value;
+    const salary_notes = document.getElementById('editSalaryNotes').value.trim();
+
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/update-salary`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.token}`
+        },
+        body: JSON.stringify({
+          employee_id,
+          designation,
+          department,
+          salary_amount,
+          salary_status,
+          salary_date,
+          payment_mode,
+          salary_notes
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update salary');
+
+      this.closeModal('updateSalaryModal');
+      this.showToast('✓ Staff salary & details updated successfully!', 'success', 'Salary Updated');
+
+      await this.loadAdminPortal();
+      if (this.selectedStudentId === employee_id) {
+        await this.selectStudent(employee_id);
+      }
+    } catch (err) {
+      this.showToast(err.message, 'error', 'Update Failed');
+    }
+  },
+
   async handleAdminEnroll(e) {
     e.preventDefault();
+    const memberType = document.getElementById('addMemberType') ? document.getElementById('addMemberType').value : 'student';
     const full_name = document.getElementById('addName').value.trim();
     const username = document.getElementById('addUsername').value.trim();
     const password = document.getElementById('addPassword').value.trim();
     const joining_date = document.getElementById('addJoiningDate').value;
+
+    let payload = {
+      full_name,
+      username,
+      password,
+      joining_date,
+      user_type: memberType
+    };
+
+    if (memberType === 'student') {
+      const trackEl = document.getElementById('addCourseTrack');
+      const totalEl = document.getElementById('addStudentTotalFees');
+      const paidEl = document.getElementById('addStudentPaidFees');
+      const statusEl = document.getElementById('addStudentFeesStatus');
+      const dueEl = document.getElementById('addStudentDueDate');
+      const notesEl = document.getElementById('addStudentPaymentNotes');
+
+      payload.course_track = trackEl ? trackEl.value.trim() : '';
+      payload.total_fees = totalEl ? Number(totalEl.value || 0) : 0;
+      payload.fees_paid = paidEl ? Number(paidEl.value || 0) : 0;
+      payload.fees_status = statusEl ? statusEl.value : 'PENDING';
+      payload.fees_due_date = dueEl ? dueEl.value : '';
+      payload.payment_notes = notesEl ? notesEl.value.trim() : '';
+    } else if (memberType === 'intern') {
+      const trackEl = document.getElementById('addInternTrack');
+      const totalEl = document.getElementById('addInternTotalFees');
+      const paidEl = document.getElementById('addInternPaidFees');
+      const statusEl = document.getElementById('addInternFeesStatus');
+      const dueEl = document.getElementById('addInternDueDate');
+      const notesEl = document.getElementById('addInternPaymentNotes');
+
+      payload.course_track = trackEl ? trackEl.value.trim() : 'Frontend Engineering Internship';
+      payload.total_fees = totalEl ? Number(totalEl.value || 0) : 0;
+      payload.fees_paid = paidEl ? Number(paidEl.value || 0) : 0;
+      payload.fees_status = statusEl ? statusEl.value : 'PAID';
+      payload.fees_due_date = dueEl ? dueEl.value : '';
+      payload.payment_notes = notesEl ? notesEl.value.trim() : '';
+    } else if (memberType === 'employee') {
+      const desigEl = document.getElementById('addEmployeeDesignation');
+      const deptEl = document.getElementById('addEmployeeDepartment');
+      const salaryEl = document.getElementById('addEmployeeSalary');
+      const statusEl = document.getElementById('addEmployeeSalaryStatus');
+      const dateEl = document.getElementById('addEmployeeSalaryDate');
+      const modeEl = document.getElementById('addEmployeePaymentMode');
+      const notesEl = document.getElementById('addEmployeeSalaryNotes');
+
+      payload.designation = desigEl ? desigEl.value.trim() : 'Staff';
+      payload.department = deptEl ? deptEl.value.trim() : 'GrowthNest';
+      payload.salary_amount = salaryEl ? Number(salaryEl.value || 0) : 0;
+      payload.salary_status = statusEl ? statusEl.value : 'PENDING';
+      payload.salary_date = dateEl ? dateEl.value : '';
+      payload.payment_mode = modeEl ? modeEl.value : 'Bank Transfer';
+      payload.salary_notes = notesEl ? notesEl.value.trim() : '';
+    }
 
     try {
       const res = await fetch(`${API_BASE}/api/admin/students`, {
@@ -1517,12 +2148,7 @@ const app = {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${this.token}`
         },
-        body: JSON.stringify({
-          full_name,
-          username,
-          password,
-          joining_date
-        })
+        body: JSON.stringify(payload)
       });
 
       const data = await res.json();
@@ -1536,8 +2162,9 @@ const app = {
       if (addUserEl) addUserEl.value = '';
       if (addPassEl) addPassEl.value = '';
 
-      // Reset sidebar filter so the new student is immediately visible in the directory
+      // Reset sidebar filter so the new member is immediately visible in directory
       this.sidebarFilter = 'all';
+      this.adminCategoryFilter = memberType;
       this.sidebarSearch = '';
       if (data.student_id) {
         this.selectedStudentId = Number(data.student_id);
@@ -1550,10 +2177,11 @@ const app = {
         await this.selectStudent(Number(data.student_id));
       }
 
+      const roleLabel = memberType === 'employee' ? 'Staff Member' : (memberType === 'intern' ? 'Intern' : 'Student');
       this.showToast(
-        `✓ ${full_name} (@${username}) enrolled successfully & Task 1 assigned!`,
+        `✓ ${full_name} (@${username}) registered successfully as ${roleLabel}!`,
         'success',
-        'Student Enrolled'
+        'Member Added'
       );
     } catch (err) {
       this.showToast(err.message, 'error', 'Enrollment Failed');
