@@ -38,6 +38,12 @@ const app = {
   adminMobileTab: 'students', // 'students' or 'workspace' (responsive mobile tabs)
   pendingReviewsList: [],
 
+  // Staff Attendance State
+  staffAttendanceSummary: null,
+  adminAttendanceDate: '',
+  adminAttendanceLedger: null,
+  selectedStaffAttendanceHistory: {},
+
   async init() {
     const savedToken = localStorage.getItem('gn_token');
     const savedUser = localStorage.getItem('gn_user');
@@ -419,13 +425,102 @@ const app = {
   // --------------------------------------------------------------------------
   async loadStaffPortal() {
     this.currentView = 'staff-portal';
+    await this.loadStaffAttendance();
     this.renderStaffPortal();
+  },
+
+  async loadStaffAttendance() {
+    try {
+      const res = await fetch(`${API_BASE}/api/staff/attendance/my-summary`, {
+        headers: { 'Authorization': `Bearer ${this.token}` }
+      });
+      if (res.ok) {
+        this.staffAttendanceSummary = await res.json();
+      }
+    } catch (err) {
+      console.error('Failed to load staff attendance:', err);
+    }
+  },
+
+  async handleStaffPunchIn(status = 'PRESENT') {
+    let notes = '';
+    if (status !== 'PRESENT') {
+      notes = prompt(status === 'LEAVE' ? 'Reason for leave (Optional):' : 'Notes for half-day:');
+      if (notes === null) return;
+    } else {
+      notes = prompt('Check-in note (Optional, e.g. Tirunelveli Office / Work from Home):', 'Office');
+      if (notes === null) return;
+    }
+
+    try {
+      const res = await fetch(`${API_BASE}/api/staff/attendance/check-in`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.token}`
+        },
+        body: JSON.stringify({ status, notes: notes || '' })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to record attendance');
+      this.showToast(data.message, 'success', 'Attendance Recorded');
+      await this.loadStaffPortal();
+    } catch (err) {
+      this.showToast(err.message, 'error', 'Error');
+    }
+  },
+
+  async handleStaffPunchOut() {
+    if (!confirm('Confirm Punch-Out for today?')) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/staff/attendance/check-out`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.token}`
+        }
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to punch out');
+      this.showToast(data.message, 'success', 'Punched Out');
+      await this.loadStaffPortal();
+    } catch (err) {
+      this.showToast(err.message, 'error', 'Error');
+    }
   },
 
   renderStaffPortal() {
     const main = document.getElementById('appRoot');
     const u = this.currentUser;
     const salaryStatus = u.salary_status || 'PENDING';
+    const att = this.staffAttendanceSummary || {
+      today: null,
+      today_date: new Date().toISOString().slice(0, 10),
+      month_stats: { present_days: 0, half_days: 0, leave_days: 0, total_recorded: 0 },
+      history: []
+    };
+
+    const todayRec = att.today;
+    const isMarked = !!todayRec;
+    const attStatus = todayRec ? todayRec.status : 'NOT_MARKED';
+    const checkIn = todayRec ? todayRec.check_in_time : null;
+    const checkOut = todayRec ? todayRec.check_out_time : null;
+
+    let statusBadge = '<span class="attendance-badge-pending">⏳ Not Marked Yet for Today</span>';
+    if (attStatus === 'PRESENT') {
+      statusBadge = `<span class="attendance-badge-present">🟢 PRESENT ${checkIn ? `(${checkIn})` : ''}</span>`;
+    } else if (attStatus === 'LEAVE') {
+      statusBadge = '<span class="attendance-badge-leave">🏖️ ON LEAVE</span>';
+    } else if (attStatus === 'HALF_DAY') {
+      statusBadge = `<span class="attendance-badge-half">🌓 HALF DAY ${checkIn ? `(${checkIn})` : ''}</span>`;
+    }
+
+    const todayDateFormatted = new Date().toLocaleDateString('en-US', {
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
 
     main.innerHTML = `
       <!-- Staff Profile Hero -->
@@ -454,16 +549,129 @@ const app = {
               <span>&bull;</span>
               <span>🏢 ${this.escape(u.department || 'GrowthNest')}</span>
               <span>&bull;</span>
-              <span style="color:#2563eb; font-weight:700;">⏱️ Day ${u.days_enrolled}</span>
+              <span style="color:#2563eb; font-weight:700;">⏱️ Service: ${u.days_enrolled} Days</span>
               <span>&bull;</span>
               <button type="button" class="btn btn-outline" style="padding:1px 8px; font-size:11px; height:auto; line-height:1.4; border-radius:12px;" onclick="document.getElementById('avatarFileInput').click()">📷 Change Photo</button>
             </div>
           </div>
         </div>
         <div style="text-align:right;">
-          <div style="font-size:12px; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Role</div>
+          <div style="font-size:12px; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Designation</div>
           <div style="font-size:18px; font-weight:800; color:#1e40af;">${this.escape(u.designation || 'Staff')}</div>
         </div>
+      </div>
+
+      <!-- DAILY ATTENDANCE & PUNCH-IN CARD -->
+      <div class="card attendance-hero-card">
+        <div class="attendance-card-header">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="font-size:24px;">📅</span>
+            <div>
+              <h3 style="font-size:17px; font-weight:800; color:var(--dark-navy);">Daily Staff Attendance & Punch Register</h3>
+              <p style="font-size:12.5px; color:var(--text-muted); margin:0;">
+                Today: <strong>${todayDateFormatted}</strong> &bull; Indian Standard Time (IST)
+              </p>
+            </div>
+          </div>
+          <div>
+            ${statusBadge}
+          </div>
+        </div>
+
+        <!-- Punch-In / Action Strip -->
+        <div class="attendance-action-strip">
+          <div>
+            <div style="font-size:14px; font-weight:800; color:var(--dark-navy);">
+              ${isMarked ? (checkOut ? `✓ Day Completed (Punch-out: ${checkOut})` : (attStatus === 'PRESENT' ? `🟢 Currently Checked-In since ${checkIn}` : `Today's Status: ${attStatus}`)) : 'Mark your daily attendance for today:'}
+            </div>
+            <div style="font-size:12px; color:var(--text-muted); margin-top:2px;">
+              ${todayRec && todayRec.notes ? `📝 Note: <em>"${this.escape(todayRec.notes)}"</em>` : 'Daily check-in maintains your active working hours and monthly payroll attendance.'}
+            </div>
+          </div>
+
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+            ${!isMarked ? `
+              <button class="btn btn-primary" style="background:#16a34a; border-color:#15803d;" onclick="app.handleStaffPunchIn('PRESENT')">
+                ✅ Punch In / Mark Present
+              </button>
+              <button class="btn btn-outline" style="border-color:#f59e0b; color:#b45309;" onclick="app.handleStaffPunchIn('HALF_DAY')">
+                🌓 Half Day
+              </button>
+              <button class="btn btn-outline" style="border-color:#ef4444; color:#dc2626;" onclick="app.handleStaffPunchIn('LEAVE')">
+                🏖️ Mark Leave
+              </button>
+            ` : (attStatus === 'PRESENT' && !checkOut ? `
+              <button class="btn btn-secondary" onclick="app.handleStaffPunchOut()">
+                🚪 Punch Out / End Day
+              </button>
+              <button class="btn btn-outline btn-sm" onclick="app.handleStaffPunchIn('PRESENT')">
+                ✏️ Edit Note
+              </button>
+            ` : `
+              <span style="font-size:12px; color:#15803d; font-weight:700;">✓ Recorded</span>
+              <button class="btn btn-outline btn-sm" onclick="app.handleStaffPunchIn('${attStatus}')">
+                ✏️ Update
+              </button>
+            `)}
+          </div>
+        </div>
+
+        <!-- Monthly Attendance Metrics -->
+        <div class="attendance-metric-grid">
+          <div class="attendance-metric-box">
+            <div class="metric-val" style="color:#15803d;">${att.month_stats.present_days || 0}</div>
+            <div class="metric-lbl">Days Present This Month</div>
+          </div>
+          <div class="attendance-metric-box">
+            <div class="metric-val" style="color:#b45309;">${att.month_stats.half_days || 0}</div>
+            <div class="metric-lbl">Half Days</div>
+          </div>
+          <div class="attendance-metric-box">
+            <div class="metric-val" style="color:#b91c1c;">${att.month_stats.leave_days || 0}</div>
+            <div class="metric-lbl">Leaves Taken</div>
+          </div>
+          <div class="attendance-metric-box">
+            <div class="metric-val" style="color:#2563eb;">${att.history.length || 0}</div>
+            <div class="metric-lbl">Total Days Logged</div>
+          </div>
+        </div>
+
+        <!-- Attendance History Table -->
+        ${att.history && att.history.length > 0 ? `
+          <div style="margin-top:10px;">
+            <div style="font-size:13px; font-weight:700; color:var(--dark-navy); margin-bottom:8px;">
+              📋 My Recent Attendance History (Last ${Math.min(att.history.length, 15)} Logged Days)
+            </div>
+            <div class="table-wrapper" style="max-height:220px; overflow-y:auto;">
+              <table class="staff-att-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Status</th>
+                    <th>Check-In</th>
+                    <th>Check-Out</th>
+                    <th>Notes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${att.history.slice(0, 15).map(h => `
+                    <tr>
+                      <td><strong>${h.attendance_date}</strong></td>
+                      <td>
+                        <span class="status-pill status-${h.status === 'PRESENT' ? 'paid' : (h.status === 'LEAVE' ? 'pending' : 'partial')}" style="font-size:10px; padding:2px 8px;">
+                          ${h.status}
+                        </span>
+                      </td>
+                      <td>${h.check_in_time || '—'}</td>
+                      <td>${h.check_out_time || '—'}</td>
+                      <td style="color:#64748b;">${this.escape(h.notes || '—')}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ` : ''}
       </div>
 
       <!-- Salary & Compensation Card -->
@@ -511,7 +719,7 @@ const app = {
           🏢 GrowthNest Tech Solutions Employee Dashboard
         </h3>
         <p style="font-size:13.5px; color:#475569; line-height:1.6;">
-          Welcome to your GrowthNest staff portal. Your salary disbursements, designation, and company profile are managed here. For questions regarding payroll, advances, or training batch allocations, please reach out directly to the administrator.
+          Welcome to your GrowthNest staff portal. Your daily attendance, monthly salary disbursements, and company profile are managed here. For questions regarding payroll, advances, or training batch allocations, please reach out directly to the administrator.
         </p>
       </div>
     `;
@@ -1052,6 +1260,12 @@ const app = {
         this.selectedStudentId = studentWithPending ? studentWithPending.id : (this.allStudents[0] ? this.allStudents[0].id : null);
       }
 
+      // Load today's staff attendance ledger for admin
+      if (!this.adminAttendanceDate) {
+        this.adminAttendanceDate = new Date().toISOString().slice(0, 10);
+      }
+      await this.loadAdminAttendanceLedger(this.adminAttendanceDate);
+
       // Fetch dedicated portfolio for selected student
       if (this.selectedStudentId) {
         await this.fetchStudentPortfolio(this.selectedStudentId);
@@ -1070,6 +1284,9 @@ const app = {
       });
       if (res.ok) {
         this.selectedStudentPortfolio = await res.json();
+        if (this.selectedStudentPortfolio && this.selectedStudentPortfolio.student && this.selectedStudentPortfolio.student.user_type === 'employee') {
+          await this.fetchStaffAttendanceHistory(studentId);
+        }
       }
     } catch (e) {
       console.error('Error fetching student portfolio', e);
@@ -1578,6 +1795,16 @@ const app = {
   // BLOCK 3: STAFF & MENTORS BLOCK
   // --------------------------------------------------------------------------
   renderEmployeesBlock(employees, totalSalary, paidSalary, pendingSalary) {
+    const attLedger = this.adminAttendanceLedger || {
+      date: this.adminAttendanceDate || new Date().toISOString().slice(0, 10),
+      total_staff: employees.length,
+      present_count: 0,
+      leave_count: 0,
+      half_day_count: 0,
+      pending_count: employees.length,
+      records: []
+    };
+
     const filtered = employees.filter(s => {
       const matchSearch = !this.sidebarSearch
         || s.full_name.toLowerCase().includes(this.sidebarSearch)
@@ -1595,7 +1822,7 @@ const app = {
       <div class="block-header-card">
         <div class="block-header-title">
           <h2><span>👔</span> Staff & Mentors Management Block</h2>
-          <p>GrowthNest Instructors, Technical Mentors & Monthly Salary Disbursements</p>
+          <p>GrowthNest Instructors, Technical Mentors, Daily Attendance & Monthly Salary Disbursements</p>
         </div>
         <button class="btn btn-primary" style="background:#2563eb; border-color:#1d4ed8;" onclick="app.openAddMemberModal('employee')">
           ➕ Register Staff Member
@@ -1631,6 +1858,29 @@ const app = {
             <div class="stat-metric-val" style="color:#b45309;">₹${pendingSalary.toLocaleString()}</div>
             <div class="stat-metric-lbl">Pending Disbursals (${pendingSalaryCount})</div>
           </div>
+        </div>
+      </div>
+
+      <!-- Daily Attendance Control Strip -->
+      <div class="card" style="margin-bottom:16px; padding:14px 18px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; border-left:4px solid #2563eb;">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <span style="font-size:24px;">📅</span>
+          <div>
+            <h3 style="font-size:15px; font-weight:800; color:var(--dark-navy); margin:0;">Daily Staff Attendance Register</h3>
+            <div style="font-size:12.5px; color:var(--text-muted); margin-top:3px;">
+              Date: <strong>${this.adminAttendanceDate || 'Today'}</strong> &bull;
+              <span style="color:#15803d; font-weight:700;">🟢 ${attLedger.present_count || 0} Present</span> &bull;
+              <span style="color:#b45309; font-weight:700;">🌓 ${attLedger.half_day_count || 0} Half Day</span> &bull;
+              <span style="color:#b91c1c; font-weight:700;">🏖️ ${attLedger.leave_count || 0} Leave</span> &bull;
+              <span style="color:#64748b;">⚪ ${attLedger.pending_count || 0} Unmarked</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:8px;">
+          <label style="font-size:12px; font-weight:700; color:#475569; margin:0;">Register Date:</label>
+          <input type="date" value="${this.adminAttendanceDate || ''}" onchange="app.changeAdminAttendanceDate(this.value)" class="form-input" style="padding:4px 8px; font-size:12px; width:auto;">
+          <button type="button" class="btn btn-outline btn-sm" onclick="app.changeAdminAttendanceDate(new Date().toISOString().slice(0, 10))">Today</button>
         </div>
       </div>
 
@@ -1699,13 +1949,11 @@ const app = {
                   </div>
                   <div style="font-size:11px; color:#475569; display:flex; justify-content:space-between; align-items:center;">
                     <span>💰 ₹${Number(s.salary_amount || 0).toLocaleString()} /mo</span>
-                    <span class="status-pill status-${(s.salary_status || 'PENDING').toLowerCase()}" style="font-size:9.5px; padding:1px 6px;">Salary: ${s.salary_status || 'PENDING'}</span>
+                    <span>${this.getEmpTodayAttendanceBadge(s.id)}</span>
                   </div>
-                  <div style="margin-top:7px; padding-top:6px; border-top:1px dashed #e2e8f0; display:flex; justify-content:space-between; align-items:center;">
-                    <span style="font-size:11px; color:#64748b;">
-                      ${(s.salary_amount || 0) > 0 ? `💼 <b style="color:#1d4ed8;">₹${Number(s.salary_amount || 0).toLocaleString()}</b>/mo` : '<span style="color:#d97706; font-weight:600;">⚠️ Salary not set</span>'}
-                    </span>
-                    <button type="button" class="btn btn-outline" style="font-size:11px; padding:2px 8px; height:auto; line-height:1.4;" onclick="event.stopPropagation(); app.openUpdateSalaryModal(${s.id})">✏️ Salary</button>
+                  <div style="margin-top:7px; padding-top:6px; border-top:1px dashed #e2e8f0; display:flex; justify-content:space-between; align-items:center; gap:6px;">
+                    <button type="button" class="btn btn-outline" style="font-size:10.5px; padding:2px 7px; height:auto; line-height:1.4;" onclick="event.stopPropagation(); app.openUpdateSalaryModal(${s.id})">✏️ Salary</button>
+                    <button type="button" class="btn btn-outline" style="font-size:10.5px; padding:2px 7px; height:auto; line-height:1.4; border-color:#93c5fd; color:#1d4ed8; background:#eff6ff;" onclick="event.stopPropagation(); app.openMarkAttendanceModal(${s.id}, '${this.escape(s.full_name)}')">📋 Attendance</button>
                   </div>
                 </div>
               `;
@@ -2079,6 +2327,38 @@ const app = {
             <span>${this.escape(emp.salary_notes)}</span>
           </div>
         ` : ''}
+      </div>
+
+      <!-- Staff Daily Attendance & Time Tracking Card -->
+      <div class="card attendance-hero-card">
+        <div class="attendance-card-header">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span style="font-size:22px;">📅</span>
+            <div>
+              <h3 style="font-size:16px; font-weight:800; color:var(--dark-navy);">Staff Attendance & Daily Time Register</h3>
+              <p style="font-size:12px; color:var(--text-muted); margin:0;">Daily presence, punch records and leave management for ${this.escape(emp.full_name)}</p>
+            </div>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="app.openMarkAttendanceModal(${emp.id}, '${this.escape(emp.full_name)}')">
+            ➕ Mark / Edit Attendance
+          </button>
+        </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; padding:12px 14px; background:#f8fafc; border-radius:8px; margin-bottom:14px; border:1px solid #e2e8f0;">
+          <div>
+            <span style="font-size:13px; font-weight:700; color:var(--dark-navy);">Today's Status (${this.adminAttendanceDate || 'Today'}):</span>
+            <span style="margin-left:6px;">
+              ${this.getEmpTodayAttendanceBadge(emp.id)}
+            </span>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="btn btn-outline btn-sm" style="font-size:11px; padding:3px 8px; color:#15803d; border-color:#86efac; background:#f0fdf4;" onclick="app.quickMarkStaffAttendance(${emp.id}, 'PRESENT')">🟢 Mark Present</button>
+            <button type="button" class="btn btn-outline btn-sm" style="font-size:11px; padding:3px 8px; color:#b45309; border-color:#fde68a; background:#fffbeb;" onclick="app.quickMarkStaffAttendance(${emp.id}, 'HALF_DAY')">🌓 Half Day</button>
+            <button type="button" class="btn btn-outline btn-sm" style="font-size:11px; padding:3px 8px; color:#b91c1c; border-color:#fca5a5; background:#fef2f2;" onclick="app.quickMarkStaffAttendance(${emp.id}, 'LEAVE')">🏖️ Leave</button>
+          </div>
+        </div>
+
+        ${this.renderStaffAttendanceHistoryTable(emp.id)}
       </div>
 
       <!-- Staff Information Note -->
@@ -2744,6 +3024,192 @@ const app = {
     } catch (err) {
       this.showToast(err.message, 'error', 'Update Failed');
     }
+  },
+
+  async loadAdminAttendanceLedger(date) {
+    const targetDate = date || this.adminAttendanceDate || new Date().toISOString().slice(0, 10);
+    this.adminAttendanceDate = targetDate;
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/staff-attendance?date=${targetDate}`, {
+        headers: { 'Authorization': `Bearer ${this.token}` }
+      });
+      if (res.ok) {
+        this.adminAttendanceLedger = await res.json();
+      }
+    } catch (err) {
+      console.error('Failed to load admin attendance ledger:', err);
+    }
+  },
+
+  async changeAdminAttendanceDate(newDate) {
+    if (!newDate) return;
+    this.adminAttendanceDate = newDate;
+    await this.loadAdminAttendanceLedger(newDate);
+    this.renderAdminPortal();
+  },
+
+  getEmpTodayAttendanceBadge(empId) {
+    if (!this.adminAttendanceLedger || !this.adminAttendanceLedger.records) {
+      return '<span class="status-pill" style="font-size:9.5px; padding:1px 6px; background:#f1f5f9; color:#64748b;">⚪ Att: Unmarked</span>';
+    }
+    const rec = this.adminAttendanceLedger.records.find(r => r.id === empId);
+    if (!rec || !rec.status) {
+      return '<span class="status-pill" style="font-size:9.5px; padding:1px 6px; background:#f1f5f9; color:#64748b;">⚪ Att: Unmarked</span>';
+    }
+    if (rec.status === 'PRESENT') {
+      return `<span class="status-pill" style="font-size:9.5px; padding:1px 6px; background:#dcfce7; color:#15803d; border-color:#86efac;">🟢 ${rec.check_in_time ? rec.check_in_time : 'Present'}</span>`;
+    }
+    if (rec.status === 'LEAVE') {
+      return '<span class="status-pill" style="font-size:9.5px; padding:1px 6px; background:#fee2e2; color:#b91c1c; border-color:#fca5a5;">🏖️ Leave</span>';
+    }
+    if (rec.status === 'HALF_DAY') {
+      return `<span class="status-pill" style="font-size:9.5px; padding:1px 6px; background:#fef3c7; color:#b45309; border-color:#fde68a;">🌓 Half-Day</span>`;
+    }
+    return `<span class="status-pill" style="font-size:9.5px; padding:1px 6px;">${rec.status}</span>`;
+  },
+
+  openMarkAttendanceModal(userId, fullName, date) {
+    const target = this.allStudents.find(s => s.id === userId);
+    const name = fullName || (target ? target.full_name : 'Staff');
+    const existingRec = (this.adminAttendanceLedger && this.adminAttendanceLedger.records)
+      ? this.adminAttendanceLedger.records.find(r => r.id === userId)
+      : null;
+
+    document.getElementById('attStaffUserId').value = userId;
+    document.getElementById('attTargetStaffName').innerText = `${name} (@${target ? target.username : ''})`;
+    document.getElementById('attDate').value = date || this.adminAttendanceDate || new Date().toISOString().slice(0, 10);
+    document.getElementById('attStatus').value = (existingRec && existingRec.status) ? existingRec.status : 'PRESENT';
+    document.getElementById('attCheckIn').value = (existingRec && existingRec.check_in_time) ? existingRec.check_in_time : '09:30 AM';
+    document.getElementById('attCheckOut').value = (existingRec && existingRec.check_out_time) ? existingRec.check_out_time : '';
+    document.getElementById('attNotes').value = (existingRec && existingRec.notes) ? existingRec.notes : '';
+
+    this.openModal('markAttendanceModal');
+  },
+
+  async handleAdminAttendanceSubmit(e) {
+    e.preventDefault();
+    const user_id = Number(document.getElementById('attStaffUserId').value);
+    const attendance_date = document.getElementById('attDate').value;
+    const status = document.getElementById('attStatus').value;
+    const check_in_time = document.getElementById('attCheckIn').value.trim();
+    const check_out_time = document.getElementById('attCheckOut').value.trim();
+    const notes = document.getElementById('attNotes').value.trim();
+
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/staff-attendance/mark`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.token}`
+        },
+        body: JSON.stringify({ user_id, attendance_date, status, check_in_time, check_out_time, notes })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to update attendance');
+
+      this.closeModal('markAttendanceModal');
+      this.showToast('✓ Attendance record saved successfully!', 'success', 'Attendance Saved');
+
+      await this.loadAdminAttendanceLedger(attendance_date);
+      if (this.selectedStudentId === user_id) {
+        await this.fetchStaffAttendanceHistory(user_id);
+      }
+      this.renderAdminPortal();
+    } catch (err) {
+      this.showToast(err.message, 'error', 'Error');
+    }
+  },
+
+  async quickMarkStaffAttendance(userId, status) {
+    const today = this.adminAttendanceDate || new Date().toISOString().slice(0, 10);
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/staff-attendance/mark`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.token}`
+        },
+        body: JSON.stringify({
+          user_id: userId,
+          attendance_date: today,
+          status,
+          check_in_time: status === 'PRESENT' || status === 'HALF_DAY' ? '09:30 AM' : ''
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to record attendance');
+      this.showToast(`✓ Marked ${status} for ${today}`, 'success', 'Attendance Recorded');
+      await this.loadAdminAttendanceLedger(today);
+      await this.fetchStaffAttendanceHistory(userId);
+      this.renderAdminPortal();
+    } catch (err) {
+      this.showToast(err.message, 'error', 'Error');
+    }
+  },
+
+  async fetchStaffAttendanceHistory(userId) {
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/staff-attendance/history?user_id=${userId}`, {
+        headers: { 'Authorization': `Bearer ${this.token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        this.selectedStaffAttendanceHistory[userId] = data.history || [];
+      }
+    } catch (err) {
+      console.error('Failed to fetch staff history:', err);
+    }
+  },
+
+  renderStaffAttendanceHistoryTable(empId) {
+    const history = this.selectedStaffAttendanceHistory[empId] || [];
+    if (history.length === 0) {
+      return `
+        <div style="text-align:center; padding:16px; color:#64748b; font-size:12.5px; background:#f8fafc; border-radius:8px;">
+          No attendance records logged yet for this staff member. Click "+ Mark / Edit Attendance" above to record presence.
+        </div>
+      `;
+    }
+
+    return `
+      <div style="margin-top:10px;">
+        <div style="font-size:13px; font-weight:700; color:var(--dark-navy); margin-bottom:8px;">
+          📋 Attendance Log (Last ${Math.min(history.length, 20)} Days)
+        </div>
+        <div class="table-wrapper" style="max-height:220px; overflow-y:auto;">
+          <table class="staff-att-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Status</th>
+                <th>Check-In</th>
+                <th>Check-Out</th>
+                <th>Notes / Mode</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${history.slice(0, 20).map(h => `
+                <tr>
+                  <td><strong>${h.attendance_date}</strong></td>
+                  <td>
+                    <span class="status-pill status-${h.status === 'PRESENT' ? 'paid' : (h.status === 'LEAVE' ? 'pending' : 'partial')}" style="font-size:10px; padding:2px 8px;">
+                      ${h.status}
+                    </span>
+                  </td>
+                  <td>${h.check_in_time || '—'}</td>
+                  <td>${h.check_out_time || '—'}</td>
+                  <td style="color:#64748b;">${this.escape(h.notes || '—')}</td>
+                  <td>
+                    <button type="button" class="btn btn-outline btn-sm" style="font-size:10px; padding:2px 6px;" onclick="app.openMarkAttendanceModal(${empId}, '', '${h.attendance_date}')">✏️ Edit</button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
   },
 
   async handleAdminEnroll(e) {

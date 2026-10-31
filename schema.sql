@@ -78,8 +78,21 @@ CREATE TABLE IF NOT EXISTS submissions (
 );
 
 -- ============================================================================
--- INITIAL USERS SEED
+-- STAFF ATTENDANCE TABLE (Daily Check-In & Tracking)
 -- ============================================================================
+CREATE TABLE IF NOT EXISTS staff_attendance (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  attendance_date TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'PRESENT', -- 'PRESENT', 'ABSENT', 'HALF_DAY', 'LEAVE'
+  check_in_time TEXT,
+  check_out_time TEXT,
+  notes TEXT,
+  marked_by TEXT DEFAULT 'STAFF', -- 'STAFF' or 'ADMIN'
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(user_id, attendance_date)
+);
+
 INSERT OR IGNORE INTO users (id, username, password_hash, role, full_name, email, phone, joining_date)
 VALUES
 (1, 'admin', '240be518fabd2724ddb6f04eeb1da5967448d7e831c08c8fa822809f74c720a9', 'admin', 'Lead Trainer / Admin', 'admin@growthnesttech.com', '+91 9876543210', '2026-01-01'),

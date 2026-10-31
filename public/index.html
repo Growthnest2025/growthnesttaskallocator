@@ -360,6 +360,63 @@
     </div>
   </div>
 
+  <!-- Admin Mark Attendance Modal -->
+  <div id="markAttendanceModal" class="modal-backdrop" style="display:none;" onclick="if(event.target===this)app.closeModal('markAttendanceModal')">
+    <div class="modal-card">
+      <div class="modal-header-strip">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div class="modal-header-icon" style="background:#eff6ff; color:#2563eb;">📅</div>
+          <div>
+            <h3 style="font-size:18px; font-weight:800; color:var(--dark-navy);">Staff Attendance Record</h3>
+            <p id="attTargetStaffName" style="font-size:12px; color:var(--text-muted); margin-top:1px;">Updating daily attendance</p>
+          </div>
+        </div>
+        <button class="modal-close-btn" onclick="app.closeModal('markAttendanceModal')">&times;</button>
+      </div>
+
+      <form onsubmit="app.handleAdminAttendanceSubmit(event)">
+        <input type="hidden" id="attStaffUserId">
+
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Attendance Date *</label>
+            <input type="date" id="attDate" class="form-input" required>
+          </div>
+          <div class="form-group">
+            <label>Status *</label>
+            <select id="attStatus" class="form-input" required>
+              <option value="PRESENT">🟢 PRESENT</option>
+              <option value="ABSENT">🔴 ABSENT</option>
+              <option value="HALF_DAY">🌓 HALF DAY</option>
+              <option value="LEAVE">🏖️ ON LEAVE</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-row-2">
+          <div class="form-group">
+            <label>Check-In Time</label>
+            <input type="text" id="attCheckIn" class="form-input" placeholder="e.g. 09:30 AM">
+          </div>
+          <div class="form-group">
+            <label>Check-Out Time</label>
+            <input type="text" id="attCheckOut" class="form-input" placeholder="e.g. 06:30 PM">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Remarks / Notes</label>
+          <input type="text" id="attNotes" class="form-input" placeholder="e.g. Tirunelveli Center / Casual Leave approved">
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+          <button type="button" class="btn btn-outline" onclick="app.closeModal('markAttendanceModal')">Cancel</button>
+          <button type="submit" class="btn btn-primary">💾 Save Attendance</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Screenshot Zoom Modal -->
   <div id="imagePreviewModal" class="modal-backdrop" style="display:none;" onclick="if(event.target===this)app.closeModal('imagePreviewModal')">
     <div class="image-preview-dialog" onclick="event.stopPropagation()">

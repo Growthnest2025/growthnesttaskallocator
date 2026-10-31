@@ -20,6 +20,17 @@ function calculateDaysEnrolled(joiningDateStr) {
   return diffDays === 0 ? 1 : diffDays + 1;
 }
 
+function getTodayIST() {
+  const d = new Date();
+  const istOffset = 5.5 * 60 * 60 * 1000;
+  return new Date(d.getTime() + istOffset).toISOString().slice(0, 10);
+}
+
+function getTimeIST() {
+  const d = new Date();
+  return d.toLocaleTimeString("en-US", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true });
+}
+
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -852,6 +863,208 @@ export default {
         return jsonResponse({
           success: true,
           message: `Student "${target.full_name}" has been permanently removed.`
+        });
+      }
+
+      // ----------------------------------------------------------------------
+      // STAFF: Daily Attendance Punch-In / Check-In
+      // ----------------------------------------------------------------------
+      if (url.pathname === "/api/staff/attendance/check-in" && request.method === "POST") {
+        const authHeader = request.headers.get("Authorization");
+        if (!authHeader) return jsonResponse({ error: "Unauthorized" }, 401);
+        const token = authHeader.replace("Bearer ", "");
+        let decoded;
+        try { decoded = JSON.parse(atob(token)); } catch(e) { return jsonResponse({ error: "Invalid token" }, 401); }
+
+        const user = await db.prepare("SELECT * FROM users WHERE id = ?").bind(decoded.id).first();
+        if (!user) return jsonResponse({ error: "User not found" }, 404);
+
+        const body = await request.json().catch(() => ({}));
+        const status = body.status || "PRESENT";
+        const notes = body.notes || "";
+        const today = getTodayIST();
+        const checkInTime = getTimeIST();
+
+        await db
+          .prepare(
+            `INSERT INTO staff_attendance (user_id, attendance_date, status, check_in_time, notes, marked_by)
+             VALUES (?, ?, ?, ?, ?, 'STAFF')
+             ON CONFLICT(user_id, attendance_date) DO UPDATE SET
+               status = excluded.status,
+               check_in_time = coalesce(staff_attendance.check_in_time, excluded.check_in_time),
+               notes = case when excluded.notes != '' then excluded.notes else staff_attendance.notes end,
+               marked_by = 'STAFF'`
+          )
+          .bind(user.id, today, status, checkInTime, notes)
+          .run();
+
+        const record = await db
+          .prepare("SELECT * FROM staff_attendance WHERE user_id = ? AND attendance_date = ?")
+          .bind(user.id, today)
+          .first();
+
+        return jsonResponse({
+          success: true,
+          message: status === "PRESENT" ? `Marked Present for today (${checkInTime})` : `Attendance updated: ${status}`,
+          attendance: record
+        });
+      }
+
+      // ----------------------------------------------------------------------
+      // STAFF: Daily Attendance Punch-Out / Check-Out
+      // ----------------------------------------------------------------------
+      if (url.pathname === "/api/staff/attendance/check-out" && request.method === "POST") {
+        const authHeader = request.headers.get("Authorization");
+        if (!authHeader) return jsonResponse({ error: "Unauthorized" }, 401);
+        const token = authHeader.replace("Bearer ", "");
+        let decoded;
+        try { decoded = JSON.parse(atob(token)); } catch(e) { return jsonResponse({ error: "Invalid token" }, 401); }
+
+        const today = getTodayIST();
+        const checkOutTime = getTimeIST();
+
+        await db
+          .prepare("UPDATE staff_attendance SET check_out_time = ? WHERE user_id = ? AND attendance_date = ?")
+          .bind(checkOutTime, decoded.id, today)
+          .run();
+
+        const record = await db
+          .prepare("SELECT * FROM staff_attendance WHERE user_id = ? AND attendance_date = ?")
+          .bind(decoded.id, today)
+          .first();
+
+        return jsonResponse({
+          success: true,
+          message: `Checked out successfully at ${checkOutTime}`,
+          attendance: record
+        });
+      }
+
+      // ----------------------------------------------------------------------
+      // STAFF: My Attendance Summary & Month Log
+      // ----------------------------------------------------------------------
+      if (url.pathname === "/api/staff/attendance/my-summary" && request.method === "GET") {
+        const authHeader = request.headers.get("Authorization");
+        if (!authHeader) return jsonResponse({ error: "Unauthorized" }, 401);
+        const token = authHeader.replace("Bearer ", "");
+        let decoded;
+        try { decoded = JSON.parse(atob(token)); } catch(e) { return jsonResponse({ error: "Invalid token" }, 401); }
+
+        const today = getTodayIST();
+        const todayRecord = await db
+          .prepare("SELECT * FROM staff_attendance WHERE user_id = ? AND attendance_date = ?")
+          .bind(decoded.id, today)
+          .first();
+
+        const currentMonth = today.slice(0, 7);
+        const monthStats = await db
+          .prepare(
+            `SELECT
+               COUNT(CASE WHEN status = 'PRESENT' THEN 1 END) as present_days,
+               COUNT(CASE WHEN status = 'HALF_DAY' THEN 1 END) as half_days,
+               COUNT(CASE WHEN status = 'LEAVE' THEN 1 END) as leave_days,
+               COUNT(*) as total_recorded
+             FROM staff_attendance
+             WHERE user_id = ? AND attendance_date LIKE ?`
+          )
+          .bind(decoded.id, `${currentMonth}%`)
+          .first();
+
+        const historyResult = await db
+          .prepare("SELECT * FROM staff_attendance WHERE user_id = ? ORDER BY attendance_date DESC LIMIT 31")
+          .bind(decoded.id)
+          .all();
+
+        return jsonResponse({
+          today: todayRecord || null,
+          today_date: today,
+          month_stats: monthStats || { present_days: 0, half_days: 0, leave_days: 0, total_recorded: 0 },
+          history: historyResult.results || []
+        });
+      }
+
+      // ----------------------------------------------------------------------
+      // ADMIN: Get Daily Attendance Ledger for Staff
+      // ----------------------------------------------------------------------
+      if (url.pathname === "/api/admin/staff-attendance" && request.method === "GET") {
+        const date = url.searchParams.get("date") || getTodayIST();
+
+        const staffMembersResult = await db
+          .prepare(
+            `SELECT u.id, u.username, u.full_name, u.designation, u.department, u.avatar_url,
+                    a.id as attendance_id, a.status, a.check_in_time, a.check_out_time, a.notes, a.marked_by
+             FROM users u
+             LEFT JOIN staff_attendance a ON a.user_id = u.id AND a.attendance_date = ?
+             WHERE u.user_type = 'employee'
+             ORDER BY u.full_name ASC`
+          )
+          .bind(date)
+          .all();
+
+        const list = staffMembersResult.results || [];
+        const presentCount = list.filter(s => s.status === "PRESENT").length;
+        const leaveCount = list.filter(s => s.status === "LEAVE").length;
+        const halfDayCount = list.filter(s => s.status === "HALF_DAY").length;
+        const pendingCount = list.filter(s => !s.status || s.status === "ABSENT").length;
+
+        return jsonResponse({
+          date,
+          today_date: getTodayIST(),
+          total_staff: list.length,
+          present_count: presentCount,
+          leave_count: leaveCount,
+          half_day_count: halfDayCount,
+          pending_count: pendingCount,
+          records: list
+        });
+      }
+
+      // ----------------------------------------------------------------------
+      // ADMIN: Mark / Update Staff Attendance
+      // ----------------------------------------------------------------------
+      if (url.pathname === "/api/admin/staff-attendance/mark" && request.method === "POST") {
+        const body = await request.json();
+        const { user_id, attendance_date, status, check_in_time, check_out_time, notes } = body;
+        if (!user_id) return jsonResponse({ error: "user_id is required" }, 400);
+
+        const targetDate = attendance_date || getTodayIST();
+        const targetStatus = status || "PRESENT";
+        const inTime = check_in_time || (targetStatus === "PRESENT" ? getTimeIST() : null);
+
+        await db
+          .prepare(
+            `INSERT INTO staff_attendance (user_id, attendance_date, status, check_in_time, check_out_time, notes, marked_by)
+             VALUES (?, ?, ?, ?, ?, ?, 'ADMIN')
+             ON CONFLICT(user_id, attendance_date) DO UPDATE SET
+               status = excluded.status,
+               check_in_time = coalesce(excluded.check_in_time, staff_attendance.check_in_time),
+               check_out_time = coalesce(excluded.check_out_time, staff_attendance.check_out_time),
+               notes = coalesce(excluded.notes, staff_attendance.notes),
+               marked_by = 'ADMIN'`
+          )
+          .bind(user_id, targetDate, targetStatus, inTime, check_out_time || null, notes || "")
+          .run();
+
+        return jsonResponse({
+          success: true,
+          message: `Attendance updated for staff ID ${user_id} on ${targetDate}`
+        });
+      }
+
+      // ----------------------------------------------------------------------
+      // ADMIN: View Specific Staff Attendance History
+      // ----------------------------------------------------------------------
+      if (url.pathname === "/api/admin/staff-attendance/history" && request.method === "GET") {
+        const userId = url.searchParams.get("user_id");
+        if (!userId) return jsonResponse({ error: "user_id required" }, 400);
+
+        const records = await db
+          .prepare("SELECT * FROM staff_attendance WHERE user_id = ? ORDER BY attendance_date DESC LIMIT 60")
+          .bind(userId)
+          .all();
+
+        return jsonResponse({
+          history: records.results || []
         });
       }
 
