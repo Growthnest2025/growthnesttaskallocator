@@ -484,6 +484,62 @@
     </div>
   </div>
 
+  <!-- Staff Daily Check-In / Punch-In Modal -->
+  <div id="staffPunchModal" class="modal-backdrop" style="display:none;" onclick="if(event.target===this)app.closeModal('staffPunchModal')">
+    <div class="modal-card">
+      <div class="modal-header-strip">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div class="modal-header-icon" style="background:#ecfdf5; color:#059669;">📅</div>
+          <div>
+            <h3 style="font-size:18px; font-weight:800; color:var(--dark-navy);">Staff Daily Attendance Check-In</h3>
+            <p id="punchModalSubtitle" style="font-size:12px; color:var(--text-muted); margin-top:1px;">Punch-in your daily presence for Admin verification</p>
+          </div>
+        </div>
+        <button class="modal-close-btn" onclick="app.closeModal('staffPunchModal')">&times;</button>
+      </div>
+
+      <form onsubmit="app.handleStaffPunchSubmit(event)">
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:14px; margin-bottom:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+              <div style="font-size:11px; text-transform:uppercase; color:#64748b; font-weight:700;">Date (IST)</div>
+              <div id="punchModalDateText" style="font-size:15px; font-weight:800; color:#1e293b;">Today</div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:11px; text-transform:uppercase; color:#64748b; font-weight:700;">Check-In Time</div>
+              <div id="punchModalTimeText" style="font-size:16px; font-weight:800; color:#2563eb;">--:--</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Attendance Status *</label>
+          <select id="punchModalStatus" class="form-input" required onchange="app.handlePunchStatusChange(this.value)">
+            <option value="PRESENT" selected>🟢 PRESENT (Full Day)</option>
+            <option value="HALF_DAY">🌓 HALF DAY</option>
+            <option value="LEAVE">🏖️ ON LEAVE</option>
+          </select>
+        </div>
+
+        <div class="form-group" id="punchCheckInGroup">
+          <label>Check-In Time</label>
+          <input type="text" id="punchModalCheckInTime" class="form-input" placeholder="e.g. 09:30 AM">
+          <small style="font-size:11px; color:#64748b;">Current Indian Standard Time (IST)</small>
+        </div>
+
+        <div class="form-group">
+          <label id="punchModalNotesLabel">Work Location / Note</label>
+          <input type="text" id="punchModalNotes" class="form-input" placeholder="e.g. Tirunelveli Center / Work from Home / Session">
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+          <button type="button" class="btn btn-outline" onclick="app.closeModal('staffPunchModal')">Cancel</button>
+          <button type="submit" class="btn btn-primary" style="background:#16a34a; border-color:#15803d; font-weight:700;">✅ Submit for Admin Verification</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- Admin Mark Attendance Modal -->
   <div id="markAttendanceModal" class="modal-backdrop" style="display:none;" onclick="if(event.target===this)app.closeModal('markAttendanceModal')">
     <div class="modal-card">

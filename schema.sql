@@ -114,6 +114,9 @@ CREATE TABLE IF NOT EXISTS staff_attendance (
   check_out_time TEXT,
   notes TEXT,
   marked_by TEXT DEFAULT 'STAFF', -- 'STAFF' or 'ADMIN'
+  verification_status TEXT DEFAULT 'PENDING', -- 'PENDING', 'VERIFIED'
+  verified_by INTEGER REFERENCES users(id),
+  verified_at TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE(user_id, attendance_date)
 );

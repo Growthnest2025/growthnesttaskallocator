@@ -1167,13 +1167,14 @@ export default {
 
         await db
           .prepare(
-            `INSERT INTO staff_attendance (user_id, attendance_date, status, check_in_time, notes, marked_by)
-             VALUES (?, ?, ?, ?, ?, 'STAFF')
+            `INSERT INTO staff_attendance (user_id, attendance_date, status, check_in_time, notes, marked_by, verification_status)
+             VALUES (?, ?, ?, ?, ?, 'STAFF', 'PENDING')
              ON CONFLICT(user_id, attendance_date) DO UPDATE SET
                status = excluded.status,
                check_in_time = coalesce(staff_attendance.check_in_time, excluded.check_in_time),
                notes = case when excluded.notes != '' then excluded.notes else staff_attendance.notes end,
-               marked_by = 'STAFF'`
+               marked_by = 'STAFF',
+               verification_status = 'PENDING'`
           )
           .bind(user.id, today, status, checkInTime, notes)
           .run();
@@ -1272,7 +1273,8 @@ export default {
         const staffMembersResult = await db
           .prepare(
             `SELECT u.id, u.username, u.full_name, u.designation, u.department, u.avatar_url,
-                    a.id as attendance_id, a.status, a.check_in_time, a.check_out_time, a.notes, a.marked_by
+                    a.id as attendance_id, a.status, a.check_in_time, a.check_out_time, a.notes, a.marked_by,
+                    a.verification_status, a.verified_by, a.verified_at
              FROM users u
              LEFT JOIN staff_attendance a ON a.user_id = u.id AND a.attendance_date = ?
              WHERE u.user_type = 'employee'
@@ -1286,6 +1288,8 @@ export default {
         const leaveCount = list.filter(s => s.status === "LEAVE").length;
         const halfDayCount = list.filter(s => s.status === "HALF_DAY").length;
         const pendingCount = list.filter(s => !s.status || s.status === "ABSENT").length;
+        const verifiedCount = list.filter(s => s.verification_status === "VERIFIED").length;
+        const pendingVerificationCount = list.filter(s => s.status && s.verification_status !== "VERIFIED").length;
 
         return jsonResponse({
           date,
@@ -1295,6 +1299,8 @@ export default {
           leave_count: leaveCount,
           half_day_count: halfDayCount,
           pending_count: pendingCount,
+          verified_count: verifiedCount,
+          pending_verification_count: pendingVerificationCount,
           records: list
         });
       }
@@ -1304,7 +1310,7 @@ export default {
       // ----------------------------------------------------------------------
       if (url.pathname === "/api/admin/staff-attendance/mark" && request.method === "POST") {
         const body = await request.json();
-        const { user_id, attendance_date, status, check_in_time, check_out_time, notes } = body;
+        const { user_id, attendance_date, status, check_in_time, check_out_time, notes, admin_id } = body;
         if (!user_id) return jsonResponse({ error: "user_id is required" }, 400);
 
         const targetDate = attendance_date || getTodayIST();
@@ -1313,21 +1319,64 @@ export default {
 
         await db
           .prepare(
-            `INSERT INTO staff_attendance (user_id, attendance_date, status, check_in_time, check_out_time, notes, marked_by)
-             VALUES (?, ?, ?, ?, ?, ?, 'ADMIN')
+            `INSERT INTO staff_attendance (user_id, attendance_date, status, check_in_time, check_out_time, notes, marked_by, verification_status, verified_by, verified_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'ADMIN', 'VERIFIED', ?, CURRENT_TIMESTAMP)
              ON CONFLICT(user_id, attendance_date) DO UPDATE SET
                status = excluded.status,
                check_in_time = coalesce(excluded.check_in_time, staff_attendance.check_in_time),
                check_out_time = coalesce(excluded.check_out_time, staff_attendance.check_out_time),
                notes = coalesce(excluded.notes, staff_attendance.notes),
-               marked_by = 'ADMIN'`
+               marked_by = 'ADMIN',
+               verification_status = 'VERIFIED',
+               verified_by = ?,
+               verified_at = CURRENT_TIMESTAMP`
           )
-          .bind(user_id, targetDate, targetStatus, inTime, check_out_time || null, notes || "")
+          .bind(user_id, targetDate, targetStatus, inTime, check_out_time || null, notes || "", admin_id || 1, admin_id || 1)
           .run();
 
         return jsonResponse({
           success: true,
           message: `Attendance updated for staff ID ${user_id} on ${targetDate}`
+        });
+      }
+
+      // ----------------------------------------------------------------------
+      // ADMIN: Verify Staff Attendance Record
+      // ----------------------------------------------------------------------
+      if (url.pathname === "/api/admin/staff-attendance/verify" && request.method === "POST") {
+        const body = await request.json();
+        const { attendance_id, status, admin_id, user_id, attendance_date } = body;
+        const targetStatus = status || "VERIFIED";
+
+        if (attendance_id) {
+          await db
+            .prepare(
+              `UPDATE staff_attendance
+               SET verification_status = ?, verified_by = ?, verified_at = CURRENT_TIMESTAMP
+               WHERE id = ?`
+            )
+            .bind(targetStatus, admin_id || 1, Number(attendance_id))
+            .run();
+        } else if (user_id) {
+          const targetDate = attendance_date || getTodayIST();
+          await db
+            .prepare(
+              `INSERT INTO staff_attendance (user_id, attendance_date, status, check_in_time, marked_by, verification_status, verified_by, verified_at)
+               VALUES (?, ?, 'PRESENT', ?, 'ADMIN', ?, ?, CURRENT_TIMESTAMP)
+               ON CONFLICT(user_id, attendance_date) DO UPDATE SET
+                 verification_status = excluded.verification_status,
+                 verified_by = excluded.verified_by,
+                 verified_at = CURRENT_TIMESTAMP`
+            )
+            .bind(Number(user_id), targetDate, getTimeIST(), targetStatus, admin_id || 1)
+            .run();
+        } else {
+          return jsonResponse({ error: "attendance_id or user_id is required" }, 400);
+        }
+
+        return jsonResponse({
+          success: true,
+          message: targetStatus === "VERIFIED" ? "Staff attendance verified successfully!" : `Verification status updated to ${targetStatus}`
         });
       }
 

@@ -442,15 +442,55 @@ const app = {
     }
   },
 
-  async handleStaffPunchIn(status = 'PRESENT') {
-    let notes = '';
-    if (status !== 'PRESENT') {
-      notes = prompt(status === 'LEAVE' ? 'Reason for leave (Optional):' : 'Notes for half-day:');
-      if (notes === null) return;
+  openStaffPunchModal(status = 'PRESENT') {
+    const today = new Date();
+    const dateFormatted = today.toLocaleDateString('en-US', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+    });
+    const currentTime = today.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+    const existingRec = this.staffAttendanceSummary ? this.staffAttendanceSummary.today : null;
+
+    const dateText = document.getElementById('punchModalDateText');
+    if (dateText) dateText.innerText = dateFormatted;
+
+    const timeText = document.getElementById('punchModalTimeText');
+    if (timeText) timeText.innerText = currentTime;
+
+    const statusSelect = document.getElementById('punchModalStatus');
+    if (statusSelect) statusSelect.value = status || (existingRec ? existingRec.status : 'PRESENT');
+
+    const inTimeInput = document.getElementById('punchModalCheckInTime');
+    if (inTimeInput) inTimeInput.value = (existingRec && existingRec.check_in_time) ? existingRec.check_in_time : currentTime;
+
+    const notesInput = document.getElementById('punchModalNotes');
+    if (notesInput) notesInput.value = (existingRec && existingRec.notes) ? existingRec.notes : 'Tirunelveli Office';
+
+    this.handlePunchStatusChange(statusSelect ? statusSelect.value : 'PRESENT');
+    this.openModal('staffPunchModal');
+  },
+
+  handlePunchStatusChange(status) {
+    const checkInGroup = document.getElementById('punchCheckInGroup');
+    const notesLabel = document.getElementById('punchModalNotesLabel');
+    const notesInput = document.getElementById('punchModalNotes');
+
+    if (status === 'LEAVE') {
+      if (checkInGroup) checkInGroup.style.display = 'none';
+      if (notesLabel) notesLabel.innerText = 'Reason for Leave *';
+      if (notesInput) notesInput.placeholder = 'e.g. Personal emergency, Medical, Casual Leave';
     } else {
-      notes = prompt('Check-in note (Optional, e.g. Tirunelveli Office / Work from Home):', 'Office');
-      if (notes === null) return;
+      if (checkInGroup) checkInGroup.style.display = 'block';
+      if (notesLabel) notesLabel.innerText = 'Work Location / Note';
+      if (notesInput) notesInput.placeholder = 'e.g. Tirunelveli Center / Work from Home / Session';
     }
+  },
+
+  async handleStaffPunchSubmit(e) {
+    e.preventDefault();
+    const status = document.getElementById('punchModalStatus').value;
+    const check_in_time = document.getElementById('punchModalCheckInTime').value.trim();
+    const notes = document.getElementById('punchModalNotes').value.trim();
 
     try {
       const res = await fetch(`${API_BASE}/api/staff/attendance/check-in`, {
@@ -459,11 +499,13 @@ const app = {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${this.token}`
         },
-        body: JSON.stringify({ status, notes: notes || '' })
+        body: JSON.stringify({ status, check_in_time, notes })
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to record attendance');
-      this.showToast(data.message, 'success', 'Attendance Recorded');
+      if (!res.ok) throw new Error(data.error || 'Failed to submit attendance');
+
+      this.closeModal('staffPunchModal');
+      this.showToast('✓ Attendance submitted! Awaiting Admin verification.', 'success', 'Check-In Recorded');
       await this.loadStaffPortal();
     } catch (err) {
       this.showToast(err.message, 'error', 'Error');
@@ -471,22 +513,30 @@ const app = {
   },
 
   async handleStaffPunchOut() {
-    if (!confirm('Confirm Punch-Out for today?')) return;
-    try {
-      const res = await fetch(`${API_BASE}/api/staff/attendance/check-out`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.token}`
+    this.showDialog({
+      type: 'info',
+      title: 'Confirm Punch-Out',
+      message: 'Are you sure you want to punch-out and complete your workday?',
+      confirmText: 'Punch Out Now',
+      cancelText: 'Cancel',
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`${API_BASE}/api/staff/attendance/check-out`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${this.token}`
+            }
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Failed to punch out');
+          this.showToast(data.message, 'success', 'Punched Out');
+          await this.loadStaffPortal();
+        } catch (err) {
+          this.showToast(err.message, 'error', 'Error');
         }
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to punch out');
-      this.showToast(data.message, 'success', 'Punched Out');
-      await this.loadStaffPortal();
-    } catch (err) {
-      this.showToast(err.message, 'error', 'Error');
-    }
+      }
+    });
   },
 
   renderStaffPortal() {
@@ -505,14 +555,15 @@ const app = {
     const attStatus = todayRec ? todayRec.status : 'NOT_MARKED';
     const checkIn = todayRec ? todayRec.check_in_time : null;
     const checkOut = todayRec ? todayRec.check_out_time : null;
+    const isVerified = todayRec && todayRec.verification_status === 'VERIFIED';
 
-    let statusBadge = '<span class="attendance-badge-pending">⏳ Not Marked Yet for Today</span>';
-    if (attStatus === 'PRESENT') {
-      statusBadge = `<span class="attendance-badge-present">🟢 PRESENT ${checkIn ? `(${checkIn})` : ''}</span>`;
-    } else if (attStatus === 'LEAVE') {
-      statusBadge = '<span class="attendance-badge-leave">🏖️ ON LEAVE</span>';
-    } else if (attStatus === 'HALF_DAY') {
-      statusBadge = `<span class="attendance-badge-half">🌓 HALF DAY ${checkIn ? `(${checkIn})` : ''}</span>`;
+    let statusBadge = '<span class="attendance-badge-pending">⏳ Not Checked-In Yet for Today</span>';
+    if (isMarked) {
+      if (isVerified) {
+        statusBadge = `<span class="attendance-badge-present" style="background:#dcfce7; color:#15803d; border:1px solid #86efac; font-weight:700;">✓ Verified by Admin (${checkIn ? checkIn : attStatus})</span>`;
+      } else {
+        statusBadge = `<span class="status-pill" style="background:#fef3c7; color:#b45309; border:1px solid #fde68a; font-weight:700;">⏳ Submitted (${checkIn || attStatus}) &bull; Awaiting Admin Verification</span>`;
+      }
     }
 
     const todayDateFormatted = new Date().toLocaleDateString('en-US', {
@@ -591,26 +642,28 @@ const app = {
 
           <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
             ${!isMarked ? `
-              <button class="btn btn-primary" style="background:#16a34a; border-color:#15803d;" onclick="app.handleStaffPunchIn('PRESENT')">
-                ✅ Punch In / Mark Present
+              <button class="btn btn-primary" style="background:#16a34a; border-color:#15803d; font-weight:700;" onclick="app.openStaffPunchModal('PRESENT')">
+                ✅ Daily Punch In / Check-In
               </button>
-              <button class="btn btn-outline" style="border-color:#f59e0b; color:#b45309;" onclick="app.handleStaffPunchIn('HALF_DAY')">
+              <button class="btn btn-outline" style="border-color:#f59e0b; color:#b45309;" onclick="app.openStaffPunchModal('HALF_DAY')">
                 🌓 Half Day
               </button>
-              <button class="btn btn-outline" style="border-color:#ef4444; color:#dc2626;" onclick="app.handleStaffPunchIn('LEAVE')">
+              <button class="btn btn-outline" style="border-color:#ef4444; color:#dc2626;" onclick="app.openStaffPunchModal('LEAVE')">
                 🏖️ Mark Leave
               </button>
             ` : (attStatus === 'PRESENT' && !checkOut ? `
               <button class="btn btn-secondary" onclick="app.handleStaffPunchOut()">
                 🚪 Punch Out / End Day
               </button>
-              <button class="btn btn-outline btn-sm" onclick="app.handleStaffPunchIn('PRESENT')">
+              <button class="btn btn-outline btn-sm" onclick="app.openStaffPunchModal('PRESENT')">
                 ✏️ Edit Note
               </button>
             ` : `
-              <span style="font-size:12px; color:#15803d; font-weight:700;">✓ Recorded</span>
-              <button class="btn btn-outline btn-sm" onclick="app.handleStaffPunchIn('${attStatus}')">
-                ✏️ Update
+              <span style="font-size:12px; ${isVerified ? 'color:#15803d;' : 'color:#b45309;'} font-weight:700;">
+                ${isVerified ? '✓ Verified by Admin' : '⏳ Submitted - Awaiting Admin Verification'}
+              </span>
+              <button class="btn btn-outline btn-sm" onclick="app.openStaffPunchModal('${attStatus}')">
+                ✏️ Update Check-In
               </button>
             `)}
           </div>
@@ -651,6 +704,7 @@ const app = {
                     <th>Check-In</th>
                     <th>Check-Out</th>
                     <th>Notes</th>
+                    <th>Verification</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -665,6 +719,17 @@ const app = {
                       <td>${h.check_in_time || '—'}</td>
                       <td>${h.check_out_time || '—'}</td>
                       <td style="color:#64748b;">${this.escape(h.notes || '—')}</td>
+                      <td>
+                        ${h.verification_status === 'VERIFIED' ? `
+                          <span class="status-pill status-paid" style="background:#dcfce7; color:#15803d; border-color:#86efac; font-size:10px; padding:2px 7px; font-weight:700;">
+                            ✓ Verified
+                          </span>
+                        ` : `
+                          <span class="status-pill" style="background:#fef3c7; color:#b45309; border:1px solid #fde68a; font-size:10px; padding:2px 7px; font-weight:700;">
+                            ⏳ Pending
+                          </span>
+                        `}
+                      </td>
                     </tr>
                   `).join('')}
                 </tbody>
@@ -2017,7 +2082,16 @@ const app = {
                   </div>
                   <div style="margin-top:7px; padding-top:6px; border-top:1px dashed #e2e8f0; display:flex; justify-content:space-between; align-items:center; gap:6px;">
                     <button type="button" class="btn btn-outline" style="font-size:10.5px; padding:2px 7px; height:auto; line-height:1.4;" onclick="event.stopPropagation(); app.openUpdateSalaryModal(${s.id})">✏️ Salary</button>
-                    <button type="button" class="btn btn-outline" style="font-size:10.5px; padding:2px 7px; height:auto; line-height:1.4; border-color:#93c5fd; color:#1d4ed8; background:#eff6ff;" onclick="event.stopPropagation(); app.openMarkAttendanceModal(${s.id}, '${this.escape(s.full_name)}')">📋 Attendance</button>
+                    ${(() => {
+                      const attRec = (attLedger && attLedger.records) ? attLedger.records.find(r => r.id === s.id) : null;
+                      if (attRec && attRec.attendance_id && attRec.verification_status !== 'VERIFIED') {
+                        return `<button type="button" class="btn btn-primary" style="font-size:10.5px; padding:2px 8px; height:auto; line-height:1.4; font-weight:700; background:#16a34a; border-color:#15803d;" onclick="event.stopPropagation(); app.verifyStaffAttendance(${attRec.attendance_id}, '${this.escape(s.full_name)}')">✓ Verify Att</button>`;
+                      } else if (attRec && attRec.attendance_id && attRec.verification_status === 'VERIFIED') {
+                        return `<button type="button" class="btn btn-outline" style="font-size:10.5px; padding:2px 7px; height:auto; line-height:1.4; border-color:#86efac; color:#15803d; background:#f0fdf4;" onclick="event.stopPropagation(); app.openMarkAttendanceModal(${s.id}, '${this.escape(s.full_name)}')">✓ Verified</button>`;
+                      } else {
+                        return `<button type="button" class="btn btn-outline" style="font-size:10.5px; padding:2px 7px; height:auto; line-height:1.4; border-color:#93c5fd; color:#1d4ed8; background:#eff6ff;" onclick="event.stopPropagation(); app.openMarkAttendanceModal(${s.id}, '${this.escape(s.full_name)}')">📋 Attendance</button>`;
+                      }
+                    })()}
                   </div>
                 </div>
               `;
@@ -2393,32 +2467,57 @@ const app = {
         ` : ''}
       </div>
 
-      <!-- Staff Daily Attendance & Time Tracking Card -->
+      <!-- Staff Daily Attendance & Verification Register Card -->
       <div class="card attendance-hero-card">
         <div class="attendance-card-header">
           <div style="display:flex; align-items:center; gap:10px;">
             <span style="font-size:22px;">📅</span>
             <div>
-              <h3 style="font-size:16px; font-weight:800; color:var(--dark-navy);">Staff Attendance & Daily Time Register</h3>
-              <p style="font-size:12px; color:var(--text-muted); margin:0;">Daily presence, punch records and leave management for ${this.escape(emp.full_name)}</p>
+              <h3 style="font-size:16px; font-weight:800; color:var(--dark-navy);">Staff Attendance & Verification Register</h3>
+              <p style="font-size:12px; color:var(--text-muted); margin:0;">Staff submits daily punch-in &bull; Admin reviews and verifies below</p>
             </div>
           </div>
-          <button class="btn btn-primary btn-sm" onclick="app.openMarkAttendanceModal(${emp.id}, '${this.escape(emp.full_name)}')">
-            ➕ Mark / Edit Attendance
+          <button class="btn btn-outline btn-sm" onclick="app.openMarkAttendanceModal(${emp.id}, '${this.escape(emp.full_name)}')">
+            ➕ Mark / Edit on Behalf
           </button>
         </div>
 
         <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; padding:12px 14px; background:#f8fafc; border-radius:8px; margin-bottom:14px; border:1px solid #e2e8f0;">
           <div>
-            <span style="font-size:13px; font-weight:700; color:var(--dark-navy);">Today's Status (${this.adminAttendanceDate || 'Today'}):</span>
+            <span style="font-size:13px; font-weight:700; color:var(--dark-navy);">Today's Attendance (${this.adminAttendanceDate || 'Today'}):</span>
             <span style="margin-left:6px;">
               ${this.getEmpTodayAttendanceBadge(emp.id)}
             </span>
           </div>
-          <div style="display:flex; gap:6px;">
-            <button type="button" class="btn btn-outline btn-sm" style="font-size:11px; padding:3px 8px; color:#15803d; border-color:#86efac; background:#f0fdf4;" onclick="app.quickMarkStaffAttendance(${emp.id}, 'PRESENT')">🟢 Mark Present</button>
-            <button type="button" class="btn btn-outline btn-sm" style="font-size:11px; padding:3px 8px; color:#b45309; border-color:#fde68a; background:#fffbeb;" onclick="app.quickMarkStaffAttendance(${emp.id}, 'HALF_DAY')">🌓 Half Day</button>
-            <button type="button" class="btn btn-outline btn-sm" style="font-size:11px; padding:3px 8px; color:#b91c1c; border-color:#fca5a5; background:#fef2f2;" onclick="app.quickMarkStaffAttendance(${emp.id}, 'LEAVE')">🏖️ Leave</button>
+          <div style="display:flex; gap:8px; align-items:center;">
+            ${(() => {
+              const rec = (this.adminAttendanceLedger && this.adminAttendanceLedger.records)
+                ? this.adminAttendanceLedger.records.find(r => r.id === emp.id)
+                : null;
+              if (rec && rec.attendance_id && rec.verification_status !== 'VERIFIED') {
+                return `
+                  <button type="button" class="btn btn-primary btn-sm" style="font-size:12px; padding:5px 14px; font-weight:700; background:#16a34a; border-color:#15803d;" onclick="app.verifyStaffAttendance(${rec.attendance_id}, '${this.escape(emp.full_name)}')">
+                    ✓ Verify Staff Attendance
+                  </button>
+                  <button type="button" class="btn btn-outline btn-sm" style="font-size:11px;" onclick="app.openMarkAttendanceModal(${emp.id}, '${this.escape(emp.full_name)}')">
+                    ✏️ Edit
+                  </button>
+                `;
+              } else if (rec && rec.attendance_id && rec.verification_status === 'VERIFIED') {
+                return `
+                  <span style="font-size:12px; color:#15803d; font-weight:700;">✓ Verified by Admin</span>
+                  <button type="button" class="btn btn-outline btn-sm" style="font-size:11px; padding:2px 8px; color:#64748b;" onclick="app.unverifyStaffAttendance(${rec.attendance_id})">Revert</button>
+                  <button type="button" class="btn btn-outline btn-sm" style="font-size:11px;" onclick="app.openMarkAttendanceModal(${emp.id}, '${this.escape(emp.full_name)}')">✏️ Edit</button>
+                `;
+              } else {
+                return `
+                  <span style="font-size:12px; color:#64748b; font-style:italic;">Staff has not punched in yet</span>
+                  <button type="button" class="btn btn-outline btn-sm" style="font-size:11px; padding:3px 8px; color:#15803d; border-color:#86efac; background:#f0fdf4;" onclick="app.quickMarkStaffAttendance(${emp.id}, 'PRESENT')">🟢 Mark & Verify Present</button>
+                  <button type="button" class="btn btn-outline btn-sm" style="font-size:11px; padding:3px 8px; color:#b45309; border-color:#fde68a; background:#fffbeb;" onclick="app.quickMarkStaffAttendance(${emp.id}, 'HALF_DAY')">🌓 Half Day</button>
+                  <button type="button" class="btn btn-outline btn-sm" style="font-size:11px; padding:3px 8px; color:#b91c1c; border-color:#fca5a5; background:#fef2f2;" onclick="app.quickMarkStaffAttendance(${emp.id}, 'LEAVE')">🏖️ Leave</button>
+                `;
+              }
+            })()}
           </div>
         </div>
 
@@ -3577,11 +3676,14 @@ const app = {
     if (!rec || !rec.status) {
       return '<span class="status-pill" style="font-size:9.5px; padding:1px 6px; background:#f1f5f9; color:#64748b;">⚪ Att: Unmarked</span>';
     }
+    const isVerified = rec.verification_status === 'VERIFIED';
     if (rec.status === 'PRESENT') {
-      return `<span class="status-pill" style="font-size:9.5px; padding:1px 6px; background:#dcfce7; color:#15803d; border-color:#86efac;">🟢 ${rec.check_in_time ? rec.check_in_time : 'Present'}</span>`;
+      return isVerified
+        ? `<span class="status-pill status-paid" style="font-size:9.5px; padding:1px 6px; background:#dcfce7; color:#15803d; border-color:#86efac; font-weight:700;">✓ Present (${rec.check_in_time || 'OK'})</span>`
+        : `<span class="status-pill" style="font-size:9.5px; padding:1px 6px; background:#fef3c7; color:#b45309; border-color:#fde68a; font-weight:700;">⏳ Needs Verif (${rec.check_in_time || 'Present'})</span>`;
     }
     if (rec.status === 'LEAVE') {
-      return '<span class="status-pill" style="font-size:9.5px; padding:1px 6px; background:#fee2e2; color:#b91c1c; border-color:#fca5a5;">🏖️ Leave</span>';
+      return `<span class="status-pill" style="font-size:9.5px; padding:1px 6px; background:#fee2e2; color:#b91c1c; border-color:#fca5a5;">🏖️ Leave</span>`;
     }
     if (rec.status === 'HALF_DAY') {
       return `<span class="status-pill" style="font-size:9.5px; padding:1px 6px; background:#fef3c7; color:#b45309; border-color:#fde68a;">🌓 Half-Day</span>`;
@@ -3590,19 +3692,33 @@ const app = {
   },
 
   openMarkAttendanceModal(userId, fullName, date) {
-    const target = this.allStudents.find(s => s.id === userId);
+    const target = this.allStudents.find(s => s.id === userId)
+      || (this.selectedStudentPortfolio && this.selectedStudentPortfolio.student && this.selectedStudentPortfolio.student.id === userId ? this.selectedStudentPortfolio.student : null);
     const name = fullName || (target ? target.full_name : 'Staff');
     const existingRec = (this.adminAttendanceLedger && this.adminAttendanceLedger.records)
       ? this.adminAttendanceLedger.records.find(r => r.id === userId)
       : null;
 
-    document.getElementById('attStaffUserId').value = userId;
-    document.getElementById('attTargetStaffName').innerText = `${name} (@${target ? target.username : ''})`;
-    document.getElementById('attDate').value = date || this.adminAttendanceDate || new Date().toISOString().slice(0, 10);
-    document.getElementById('attStatus').value = (existingRec && existingRec.status) ? existingRec.status : 'PRESENT';
-    document.getElementById('attCheckIn').value = (existingRec && existingRec.check_in_time) ? existingRec.check_in_time : '09:30 AM';
-    document.getElementById('attCheckOut').value = (existingRec && existingRec.check_out_time) ? existingRec.check_out_time : '';
-    document.getElementById('attNotes').value = (existingRec && existingRec.notes) ? existingRec.notes : '';
+    const idInput = document.getElementById('attStaffUserId');
+    if (idInput) idInput.value = userId;
+
+    const nameEl = document.getElementById('attTargetStaffName');
+    if (nameEl) nameEl.innerText = `${name} (@${target ? target.username : ''})`;
+
+    const dateInput = document.getElementById('attDate');
+    if (dateInput) dateInput.value = date || this.adminAttendanceDate || new Date().toISOString().slice(0, 10);
+
+    const statusInput = document.getElementById('attStatus');
+    if (statusInput) statusInput.value = (existingRec && existingRec.status) ? existingRec.status : 'PRESENT';
+
+    const checkInInput = document.getElementById('attCheckIn');
+    if (checkInInput) checkInInput.value = (existingRec && existingRec.check_in_time) ? existingRec.check_in_time : '09:30 AM';
+
+    const checkOutInput = document.getElementById('attCheckOut');
+    if (checkOutInput) checkOutInput.value = (existingRec && existingRec.check_out_time) ? existingRec.check_out_time : '';
+
+    const notesInput = document.getElementById('attNotes');
+    if (notesInput) notesInput.value = (existingRec && existingRec.notes) ? existingRec.notes : '';
 
     this.openModal('markAttendanceModal');
   },
@@ -3623,13 +3739,21 @@ const app = {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${this.token}`
         },
-        body: JSON.stringify({ user_id, attendance_date, status, check_in_time, check_out_time, notes })
+        body: JSON.stringify({
+          user_id,
+          attendance_date,
+          status,
+          check_in_time,
+          check_out_time,
+          notes,
+          admin_id: this.currentUser ? this.currentUser.id : 1
+        })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to update attendance');
 
       this.closeModal('markAttendanceModal');
-      this.showToast('✓ Attendance record saved successfully!', 'success', 'Attendance Saved');
+      this.showToast('✓ Attendance record saved & verified!', 'success', 'Attendance Saved');
 
       await this.loadAdminAttendanceLedger(attendance_date);
       if (this.selectedStudentId === user_id) {
@@ -3654,14 +3778,75 @@ const app = {
           user_id: userId,
           attendance_date: today,
           status,
-          check_in_time: status === 'PRESENT' || status === 'HALF_DAY' ? '09:30 AM' : ''
+          check_in_time: status === 'PRESENT' || status === 'HALF_DAY' ? '09:30 AM' : '',
+          admin_id: this.currentUser ? this.currentUser.id : 1
         })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to record attendance');
-      this.showToast(`✓ Marked ${status} for ${today}`, 'success', 'Attendance Recorded');
+      this.showToast(`✓ Marked & verified ${status} for ${today}`, 'success', 'Attendance Recorded');
       await this.loadAdminAttendanceLedger(today);
       await this.fetchStaffAttendanceHistory(userId);
+      this.renderAdminPortal();
+    } catch (err) {
+      this.showToast(err.message, 'error', 'Error');
+    }
+  },
+
+  async verifyStaffAttendance(attendanceId, staffName = '', userId = null, attendanceDate = null) {
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/staff-attendance/verify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.token}`
+        },
+        body: JSON.stringify({
+          attendance_id: attendanceId,
+          user_id: userId,
+          attendance_date: attendanceDate,
+          status: 'VERIFIED',
+          admin_id: this.currentUser ? this.currentUser.id : 1
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to verify attendance');
+
+      this.showToast(`✓ Staff attendance verified!`, 'success', 'Attendance Verified');
+      const curDate = this.adminAttendanceDate || new Date().toISOString().slice(0, 10);
+      await this.loadAdminAttendanceLedger(curDate);
+      if (this.selectedStudentId) {
+        await this.fetchStaffAttendanceHistory(this.selectedStudentId);
+      }
+      this.renderAdminPortal();
+    } catch (err) {
+      this.showToast(err.message, 'error', 'Verification Failed');
+    }
+  },
+
+  async unverifyStaffAttendance(attendanceId) {
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/staff-attendance/verify`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.token}`
+        },
+        body: JSON.stringify({
+          attendance_id: attendanceId,
+          status: 'PENDING',
+          admin_id: this.currentUser ? this.currentUser.id : 1
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to revert verification');
+
+      this.showToast('Attendance verification reverted to Pending', 'info', 'Status Updated');
+      const curDate = this.adminAttendanceDate || new Date().toISOString().slice(0, 10);
+      await this.loadAdminAttendanceLedger(curDate);
+      if (this.selectedStudentId) {
+        await this.fetchStaffAttendanceHistory(this.selectedStudentId);
+      }
       this.renderAdminPortal();
     } catch (err) {
       this.showToast(err.message, 'error', 'Error');
@@ -3687,7 +3872,7 @@ const app = {
     if (history.length === 0) {
       return `
         <div style="text-align:center; padding:16px; color:#64748b; font-size:12.5px; background:#f8fafc; border-radius:8px;">
-          No attendance records logged yet for this staff member. Click "+ Mark / Edit Attendance" above to record presence.
+          No attendance records logged yet for this staff member. Staff can punch-in daily, and Admin verifies it here.
         </div>
       `;
     }
@@ -3705,27 +3890,51 @@ const app = {
                 <th>Status</th>
                 <th>Check-In</th>
                 <th>Check-Out</th>
-                <th>Notes / Mode</th>
-                <th>Action</th>
+                <th>Notes</th>
+                <th>Verification</th>
+                <th style="text-align:right;">Admin Action</th>
               </tr>
             </thead>
             <tbody>
-              ${history.slice(0, 20).map(h => `
-                <tr>
-                  <td><strong>${h.attendance_date}</strong></td>
-                  <td>
-                    <span class="status-pill status-${h.status === 'PRESENT' ? 'paid' : (h.status === 'LEAVE' ? 'pending' : 'partial')}" style="font-size:10px; padding:2px 8px;">
-                      ${h.status}
-                    </span>
-                  </td>
-                  <td>${h.check_in_time || '—'}</td>
-                  <td>${h.check_out_time || '—'}</td>
-                  <td style="color:#64748b;">${this.escape(h.notes || '—')}</td>
-                  <td>
-                    <button type="button" class="btn btn-outline btn-sm" style="font-size:10px; padding:2px 6px;" onclick="app.openMarkAttendanceModal(${empId}, '', '${h.attendance_date}')">✏️ Edit</button>
-                  </td>
-                </tr>
-              `).join('')}
+              ${history.slice(0, 20).map(h => {
+                const isVer = h.verification_status === 'VERIFIED';
+                return `
+                  <tr style="${!isVer ? 'background:#fffdf5;' : ''}">
+                    <td><strong>${h.attendance_date}</strong></td>
+                    <td>
+                      <span class="status-pill status-${h.status === 'PRESENT' ? 'paid' : (h.status === 'LEAVE' ? 'pending' : 'partial')}" style="font-size:10px; padding:2px 8px;">
+                        ${h.status}
+                      </span>
+                    </td>
+                    <td>${h.check_in_time || '—'}</td>
+                    <td>${h.check_out_time || '—'}</td>
+                    <td style="color:#64748b;">${this.escape(h.notes || '—')}</td>
+                    <td>
+                      ${isVer ? `
+                        <span class="status-pill status-paid" style="background:#dcfce7; color:#15803d; border-color:#86efac; font-size:10px; padding:2px 7px; font-weight:700;">
+                          ✓ Verified
+                        </span>
+                      ` : `
+                        <span class="status-pill" style="background:#fef3c7; color:#b45309; border:1px solid #fde68a; font-size:10px; padding:2px 7px; font-weight:700;">
+                          ⏳ Needs Verif
+                        </span>
+                      `}
+                    </td>
+                    <td style="text-align:right;">
+                      ${!isVer ? `
+                        <button type="button" class="btn btn-primary btn-sm" style="font-size:10px; padding:2px 7px; font-weight:700; background:#16a34a; border-color:#15803d;" onclick="app.verifyStaffAttendance(${h.id}, '')">
+                          ✓ Verify
+                        </button>
+                      ` : `
+                        <button type="button" class="btn btn-outline btn-sm" style="font-size:10px; padding:2px 6px; color:#64748b;" onclick="app.unverifyStaffAttendance(${h.id})">
+                          Undo
+                        </button>
+                      `}
+                      <button type="button" class="btn btn-outline btn-sm" style="font-size:10px; padding:2px 6px; margin-left:3px;" onclick="app.openMarkAttendanceModal(${empId}, '', '${h.attendance_date}')">✏️</button>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
             </tbody>
           </table>
         </div>
