@@ -888,6 +888,23 @@ const requestHandler = async (req, res) => {
     }
 
     // ------------------------------------------------------------------------
+    // API: Admin Pending Submissions Queue
+    // ------------------------------------------------------------------------
+    if (pathname === '/api/admin/pending-reviews' && req.method === 'GET') {
+      const rows = db.prepare(`
+        SELECT s.*, 
+               u.full_name as student_name, u.username as student_username, u.user_type, u.course_track,
+               t.title as task_title, t.module as task_module, t.sequence_order
+        FROM submissions s
+        JOIN users u ON s.student_id = u.id
+        JOIN tasks t ON s.task_id = t.id
+        WHERE s.status IN ('PENDING', 'CHANGES_REQUESTED')
+        ORDER BY s.id DESC
+      `).all();
+      return sendJson(res, 200, { pending_reviews: rows || [] });
+    }
+
+    // ------------------------------------------------------------------------
     // API: Admin Dedicated Student Portfolio & History (Per-Student Workspace)
     // ------------------------------------------------------------------------
     if (pathname === '/api/admin/student-portfolio' && req.method === 'GET') {

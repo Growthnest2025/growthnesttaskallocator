@@ -526,6 +526,28 @@ export default {
       }
 
       // ----------------------------------------------------------------------
+      // ADMIN: Get All Pending Submissions Queue
+      // ----------------------------------------------------------------------
+      if (url.pathname === "/api/admin/pending-reviews" && request.method === "GET") {
+        const reviewsRes = await db
+          .prepare(
+            `SELECT s.*, 
+                    u.full_name as student_name, u.username as student_username, u.user_type, u.course_track,
+                    t.title as task_title, t.module as task_module, t.sequence_order
+             FROM submissions s
+             JOIN users u ON s.student_id = u.id
+             JOIN tasks t ON s.task_id = t.id
+             WHERE s.status IN ('PENDING', 'CHANGES_REQUESTED')
+             ORDER BY s.id DESC`
+          )
+          .all();
+
+        return jsonResponse({
+          pending_reviews: reviewsRes.results || []
+        });
+      }
+
+      // ----------------------------------------------------------------------
       // ADMIN: Dedicated Student / Member Portfolio & History
       // ----------------------------------------------------------------------
       if (url.pathname === "/api/admin/student-portfolio" && request.method === "GET") {

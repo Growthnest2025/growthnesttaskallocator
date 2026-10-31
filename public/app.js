@@ -16,8 +16,9 @@ const API_BASE = window.location.origin;
 const app = {
   currentUser: null,
   token: null,
-  currentView: 'home', // 'home', 'student-auth', 'admin-auth', 'student-portal', 'admin-portal'
+  currentView: 'home', // 'home', 'student-auth', 'intern-auth', 'employee-auth', 'admin-auth', 'student-portal', 'staff-portal', 'admin-portal'
   authTab: 'login', // 'login' or 'register'
+  authRole: 'student', // 'student', 'intern', 'employee', 'admin'
 
   // Student Portal State
   roadmap: [],
@@ -30,10 +31,12 @@ const app = {
   allStudents: [],
   selectedStudentId: null,
   selectedStudentPortfolio: null,
+  adminActiveBlock: 'students', // 'students', 'interns', 'employees', 'reviews', 'finance'
   adminCategoryFilter: 'all', // 'all', 'student', 'intern', 'employee'
   sidebarFilter: 'all', // 'all', 'pending', 'completed'
   sidebarSearch: '',
   adminMobileTab: 'students', // 'students' or 'workspace' (responsive mobile tabs)
+  pendingReviewsList: [],
 
   async init() {
     const savedToken = localStorage.getItem('gn_token');
@@ -70,32 +73,43 @@ const app = {
     const nav = document.getElementById('headerUserStrip');
     if (!this.currentUser) {
       nav.innerHTML = `
-        <button class="btn btn-primary btn-sm" onclick="app.showStudentAuth()">Student Portal</button>
-        <button class="btn btn-outline btn-sm nav-admin-btn" onclick="app.showAdminAuth()">🛡️ Admin</button>
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-primary btn-sm" onclick="app.showRoleAuth('student')">🎓 Student Login</button>
+          <button class="btn btn-outline btn-sm" style="border-color:#f59e0b; color:#b45309;" onclick="app.showRoleAuth('intern')">💼 Intern Login</button>
+          <button class="btn btn-outline btn-sm" style="border-color:#3b82f6; color:#1d4ed8;" onclick="app.showRoleAuth('employee')">👔 Staff Login</button>
+          <button class="btn btn-outline btn-sm nav-admin-btn" onclick="app.showRoleAuth('admin')">🛡️ Admin</button>
+        </div>
       `;
       return;
     }
 
     const u = this.currentUser;
     const isAdm = u.role === 'admin';
+    const isEmp = u.user_type === 'employee';
+    const isInt = u.user_type === 'intern';
     const pendingTotal = this.allStudents ? this.allStudents.filter(s => s.pending_count > 0).length : 0;
+
+    let roleTag = '🎓 Student';
+    if (isAdm) roleTag = '🛡️ Admin';
+    else if (isEmp) roleTag = '👔 Staff';
+    else if (isInt) roleTag = '💼 Intern';
 
     nav.innerHTML = `
       ${isAdm && pendingTotal > 0 ? `
-        <button class="nav-notif-btn has-pending" onclick="app.quickOpenNextPending()" title="${pendingTotal} student submission(s) awaiting review! Click to review now.">
+        <button class="nav-notif-btn has-pending" onclick="app.setAdminActiveBlock('reviews')" title="${pendingTotal} submission(s) awaiting review! Click to review now.">
           🔔 <span class="notif-badge-pill">${pendingTotal} New</span>
         </button>
       ` : ''}
-      <div class="user-pill ${isAdm ? 'admin-pill' : 'student-pill'}">
+      <div class="user-pill ${isAdm ? 'admin-pill' : (isEmp ? 'badge-employee' : 'student-pill')}">
         ${!isAdm && u.avatar_url ? `<img src="${u.avatar_url}" alt="" class="nav-avatar-img">` : ''}
-        ${isAdm ? '🛡️ Admin' : `🎓 ${this.escape(u.full_name || u.username)}`}
+        ${isAdm ? '🛡️ Admin Hub' : `${roleTag}: ${this.escape(u.full_name || u.username)}`}
       </div>
       <button class="nav-logout-btn" onclick="app.logout()">Sign Out</button>
     `;
   },
 
   // --------------------------------------------------------------------------
-  // 1. HOME SCREEN (Clean Landing & Role Clarification)
+  // 1. HOME SCREEN (Clean Landing with 4 Distinct Portals)
   // --------------------------------------------------------------------------
   showHome() {
     this.currentView = 'home';
@@ -108,32 +122,60 @@ const app = {
           <img src="logo.png" alt="GrowthNest Tech Solutions Official Logo">
         </div>
         <span class="home-badge-pill">🚀 Practical Real-Time Software Training &bull; Tirunelveli</span>
-        <h1>GrowthNest Tech Solutions <span>Student Task Portal</span></h1>
+        <h1>GrowthNest Tech Solutions <span>Task & Operations Portal</span></h1>
         <p>
-          Master Full-Stack Frontend Engineering from <strong>HTML5 &rarr; CSS3 &rarr; JavaScript</strong>. Complete 23 hands-on practical assignments, write your own code, and advance sequentially as trainers evaluate and approve each milestone.
+          Integrated platform for <strong>Course Students, Interns, Staff & Mentors</strong>. Track progressive 23-task engineering curriculums, evaluate live submissions, and manage course fees & staff payroll.
         </p>
       </section>
 
-      <!-- Clear Role Selection (Student vs Admin) -->
+      <!-- 4 Distinct Portals Grid: Students, Interns, Staff, Admin -->
       <div class="portal-choices-grid">
-        <!-- Student Portal Card -->
-        <div class="portal-choice-card student-theme" onclick="app.showStudentAuth()">
+        <!-- 1. Course Student Portal -->
+        <div class="portal-choice-card student-theme" onclick="app.showRoleAuth('student')">
           <div>
             <div class="portal-card-icon student-bg">🎓</div>
-            <h3>Student Portal</h3>
-            <p>Access your personalized task roadmap, write or paste your code, attach output screenshots, and track your active training timeline.</p>
+            <span class="badge-role badge-student" style="margin-bottom:8px;">23-Task Curriculum</span>
+            <h3>Course Student Portal</h3>
+            <p>Access your sequential curriculum roadmap, write & submit code, upload output screenshots, and view tuition fee details.</p>
           </div>
           <button class="btn btn-primary" style="width: 100%; padding: 12px;">
             Access Student Portal &rarr;
           </button>
         </div>
 
-        <!-- Admin Portal Card -->
-        <div class="portal-choice-card admin-theme" onclick="app.showAdminAuth()">
+        <!-- 2. Intern Portal -->
+        <div class="portal-choice-card intern-theme" onclick="app.showRoleAuth('intern')">
+          <div>
+            <div class="portal-card-icon intern-bg">💼</div>
+            <span class="badge-role badge-intern" style="margin-bottom:8px;">Internship Track</span>
+            <h3>Internship Portal</h3>
+            <p>Access assigned internship tasks, submit project milestones, receive mentor feedback, and track your fee/stipend status.</p>
+          </div>
+          <button class="btn btn-primary" style="width: 100%; padding: 12px; background:#f59e0b; border-color:#d97706;">
+            Access Intern Portal &rarr;
+          </button>
+        </div>
+
+        <!-- 3. Employee / Staff Portal -->
+        <div class="portal-choice-card employee-theme" onclick="app.showRoleAuth('employee')">
+          <div>
+            <div class="portal-card-icon employee-bg">👔</div>
+            <span class="badge-role badge-employee" style="margin-bottom:8px;">GrowthNest Team</span>
+            <h3>Staff & Mentor Portal</h3>
+            <p>Access instructor dashboard, mentor credentials, department profile, and view your monthly salary disbursement records.</p>
+          </div>
+          <button class="btn btn-primary" style="width: 100%; padding: 12px; background:#2563eb; border-color:#1d4ed8;">
+            Access Staff Portal &rarr;
+          </button>
+        </div>
+
+        <!-- 4. Admin Portal -->
+        <div class="portal-choice-card admin-theme" onclick="app.showRoleAuth('admin')">
           <div>
             <div class="portal-card-icon admin-bg">🛡️</div>
+            <span class="badge-role" style="background:#f1f5f9; color:#0f172a; border:1px solid #cbd5e1; margin-bottom:8px;">Executive Hub</span>
             <h3>Admin & Mentor Hub</h3>
-            <p>Review student code, evaluate output screenshots, receive real-time submission notifications per student, and approve progress.</p>
+            <p>Manage separate blocks for Students, Interns & Staff, evaluate code submissions, and oversee fee collection & staff payroll.</p>
           </div>
           <button class="btn btn-gold" style="width: 100%; padding: 12px; font-weight:700;">
             Enter Admin Dashboard &rarr;
@@ -179,14 +221,44 @@ const app = {
       </div>
     `;
   },
-
   // --------------------------------------------------------------------------
-  // 2. AUTHENTICATION SCREENS (Student & Admin)
+  // 2. DISTINCT AUTHENTICATION SCREENS (Student, Intern, Staff, Admin)
   // --------------------------------------------------------------------------
-  showStudentAuth(errorMsg = '', successMsg = '') {
-    this.currentView = 'student-auth';
+  showRoleAuth(role = 'student', errorMsg = '', successMsg = '') {
+    this.authRole = role;
+    this.currentView = `${role}-auth`;
     const main = document.getElementById('appRoot');
     const today = new Date().toISOString().split('T')[0];
+
+    let icon = '🎓';
+    let title = 'Course Student Portal';
+    let subtitle = 'Sign in to access your 23-task curriculum roadmap, submit code & track fees';
+    let btnClass = 'btn-primary';
+    let btnText = 'Sign In to Student Portal &rarr;';
+    let userPlaceholder = 'Enter student username (e.g. Berlin2005)';
+
+    if (role === 'intern') {
+      icon = '💼';
+      title = 'Internship Training Portal';
+      subtitle = 'Sign in to access assigned internship projects, task reviews & stipend details';
+      btnClass = 'btn-primary" style="background:#f59e0b; border-color:#d97706;';
+      btnText = 'Sign In to Intern Portal &rarr;';
+      userPlaceholder = 'Enter intern username (e.g. intern_suresh)';
+    } else if (role === 'employee') {
+      icon = '👔';
+      title = 'Staff & Mentor Portal';
+      subtitle = 'Sign in to access staff profile, instructor credentials & salary records';
+      btnClass = 'btn-primary" style="background:#2563eb; border-color:#1d4ed8;';
+      btnText = 'Sign In to Staff Portal &rarr;';
+      userPlaceholder = 'Enter staff username (e.g. trainer_praveen)';
+    } else if (role === 'admin') {
+      icon = '🛡️';
+      title = 'Admin & Executive Hub';
+      subtitle = 'Sign in to evaluate submissions, manage students, interns, staff & financials';
+      btnClass = 'btn-gold';
+      btnText = 'Sign In as Admin / Mentor &rarr;';
+      userPlaceholder = 'Enter admin username (e.g. admin)';
+    }
 
     main.innerHTML = `
       <div class="auth-box">
@@ -194,37 +266,51 @@ const app = {
 
         <div style="text-align: center; margin-bottom: 20px;">
           <img src="logo.png" alt="GrowthNest Logo" style="height:52px; width:auto; border-radius:8px; margin-bottom:10px;">
-          <h2 style="font-size: 20px; font-weight: 800; color: var(--dark-navy);">Student Portal</h2>
-          <p style="font-size: 13px; color: var(--text-muted);">Sign in to access your assigned tasks and submit your code</p>
+          <div style="font-size:28px; margin-bottom:6px;">${icon}</div>
+          <h2 style="font-size: 20px; font-weight: 800; color: var(--dark-navy);">${title}</h2>
+          <p style="font-size: 13px; color: var(--text-muted);">${subtitle}</p>
         </div>
 
-        <div class="auth-tabs">
-          <button class="auth-tab ${this.authTab === 'login' ? 'active' : ''}" onclick="app.setStudentAuthTab('login')">
-            Student Sign In
-          </button>
-          <button class="auth-tab ${this.authTab === 'register' ? 'active' : ''}" onclick="app.setStudentAuthTab('register')">
-            New Student Sign Up
-          </button>
-        </div>
+        ${role === 'student' ? `
+          <div class="auth-tabs">
+            <button class="auth-tab ${this.authTab === 'login' ? 'active' : ''}" onclick="app.setStudentAuthTab('login')">
+              Student Sign In
+            </button>
+            <button class="auth-tab ${this.authTab === 'register' ? 'active' : ''}" onclick="app.setStudentAuthTab('register')">
+              New Student Sign Up
+            </button>
+          </div>
+        ` : ''}
 
         ${errorMsg ? `<div class="alert-box alert-danger">⚠️ ${this.escape(errorMsg)}</div>` : ''}
         ${successMsg ? `<div class="alert-box alert-success">✓ ${this.escape(successMsg)}</div>` : ''}
 
-        ${this.authTab === 'login' ? `
-          <form onsubmit="app.handleLogin(event, 'student')">
+        ${(role !== 'student' || this.authTab === 'login') ? `
+          <form onsubmit="app.handleLogin(event, '${role}')">
             <div class="form-group">
-              <label>Student Username</label>
-              <input type="text" id="loginUsername" class="form-input" required placeholder="Enter student username (e.g. Berlin2005)" autocomplete="username">
+              <label>Username / Login ID</label>
+              <input type="text" id="loginUsername" class="form-input" required placeholder="${userPlaceholder}" autocomplete="username">
             </div>
             <div class="form-group">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
                 <label style="margin-bottom:0;">Password</label>
                 <button type="button" onclick="app.togglePasswordVisibility('loginPassword', this)" style="background:none; border:none; color:var(--emerald-dark); font-size:12px; font-weight:700; cursor:pointer;">👁️ Show Password</button>
               </div>
-              <input type="password" id="loginPassword" class="form-input" required placeholder="Enter password" autocomplete="current-password">
+              <input type="password" id="loginPassword" class="form-input" required placeholder="Enter your password" autocomplete="current-password">
             </div>
-            <button type="submit" class="btn btn-primary" style="width: 100%; padding: 12px;">Sign In to Student Portal &rarr;</button>
+            <button type="submit" class="btn ${btnClass}" style="width: 100%; padding: 12px;">${btnText}</button>
           </form>
+
+          ${role === 'intern' ? `
+            <div style="text-align:center; margin-top:16px; font-size:12.5px; color:#64748b;">
+              New Intern? Contact GrowthNest administration for internship enrollment.
+            </div>
+          ` : ''}
+          ${role === 'employee' ? `
+            <div style="text-align:center; margin-top:16px; font-size:12.5px; color:#64748b;">
+              GrowthNest Staff & Mentor Portal &bull; Tirunelveli Division
+            </div>
+          ` : ''}
         ` : `
           <form onsubmit="app.handleRegister(event)">
             <div class="form-group">
@@ -253,55 +339,27 @@ const app = {
     `;
   },
 
+  showStudentAuth(errorMsg = '', successMsg = '') {
+    this.showRoleAuth('student', errorMsg, successMsg);
+  },
+
   showAdminAuth(errorMsg = '') {
-    this.currentView = 'admin-auth';
-    const main = document.getElementById('appRoot');
-
-    main.innerHTML = `
-      <div class="auth-box">
-        <button class="back-role-btn" onclick="app.showHome()">&larr; Back to Home</button>
-
-        <div style="text-align: center; margin-bottom: 20px;">
-          <img src="logo.png" alt="GrowthNest Logo" style="height:52px; width:auto; border-radius:8px; margin-bottom:10px;">
-          <h2 style="font-size: 20px; font-weight: 800; color: var(--dark-navy);">Admin & Mentor Hub</h2>
-          <p style="font-size: 13px; color: var(--text-muted);">Sign in to inspect student submissions, view code & track progress</p>
-        </div>
-
-        ${errorMsg ? `<div class="alert-box alert-danger">⚠️ ${this.escape(errorMsg)}</div>` : ''}
-
-        <form onsubmit="app.handleLogin(event, 'admin')">
-          <div class="form-group">
-            <label>Admin Username</label>
-            <input type="text" id="loginUsername" class="form-input" required placeholder="Enter admin username (e.g. admin)">
-          </div>
-          <div class="form-group">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-              <label style="margin-bottom:0;">Password</label>
-              <button type="button" onclick="app.togglePasswordVisibility('loginPassword', this)" style="background:none; border:none; color:var(--dark-navy); font-size:12px; font-weight:700; cursor:pointer;">👁️ Show</button>
-            </div>
-            <input type="password" id="loginPassword" class="form-input" required placeholder="Enter password">
-          </div>
-          <button type="submit" class="btn btn-gold" style="width: 100%; padding: 12px;">
-            Sign In as Admin / Mentor &rarr;
-          </button>
-        </form>
-      </div>
-    `;
+    this.showRoleAuth('admin', errorMsg);
   },
 
   setStudentAuthTab(tab) {
     this.authTab = tab;
-    this.showStudentAuth();
+    this.showRoleAuth('student');
   },
 
-  async handleLogin(e, role) {
+  async handleLogin(e, role = 'student') {
     e.preventDefault();
     const u = document.getElementById('loginUsername').value.trim();
     const p = document.getElementById('loginPassword').value.trim();
-    await this.quickLogin(u, p);
+    await this.quickLogin(u, p, role);
   },
 
-  async quickLogin(username, password) {
+  async quickLogin(username, password, expectedRole = null) {
     try {
       const res = await fetch(`${API_BASE}/api/auth/login`, {
         method: 'POST',
@@ -311,6 +369,10 @@ const app = {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Login failed');
 
+      if (expectedRole === 'admin' && data.user.role !== 'admin') {
+        throw new Error('Access denied. This login is reserved for GrowthNest Administrators only.');
+      }
+
       this.token = data.token;
       this.currentUser = data.user;
       localStorage.setItem('gn_token', this.token);
@@ -319,11 +381,7 @@ const app = {
       this.renderNav();
       await this.loadPortal();
     } catch (err) {
-      if (this.currentView === 'admin-auth') {
-        this.showAdminAuth(err.message);
-      } else {
-        this.showStudentAuth(err.message);
-      }
+      this.showRoleAuth(expectedRole || this.authRole || 'student', err.message);
     }
   },
 
@@ -1109,177 +1167,244 @@ const app = {
     this.renderAdminPortal();
   },
 
-  setAdminCategoryFilter(category) {
-    this.adminCategoryFilter = category;
+  setAdminActiveBlock(block) {
+    this.adminActiveBlock = block;
+    this.sidebarSearch = '';
+    this.sidebarFilter = 'all';
+
+    // Auto-select first member in this category if switching to directory blocks
+    if (block === 'students') {
+      const first = this.allStudents.find(s => (s.user_type || 'student') === 'student');
+      if (first) {
+        this.selectedStudentId = first.id;
+        this.fetchStudentPortfolio(first.id).then(() => this.renderAdminPortal());
+        return;
+      }
+    } else if (block === 'interns') {
+      const first = this.allStudents.find(s => s.user_type === 'intern');
+      if (first) {
+        this.selectedStudentId = first.id;
+        this.fetchStudentPortfolio(first.id).then(() => this.renderAdminPortal());
+        return;
+      }
+    } else if (block === 'employees') {
+      const first = this.allStudents.find(s => s.user_type === 'employee');
+      if (first) {
+        this.selectedStudentId = first.id;
+        this.fetchStudentPortfolio(first.id).then(() => this.renderAdminPortal());
+        return;
+      }
+    } else if (block === 'reviews') {
+      this.fetchPendingReviews().then(() => this.renderAdminPortal());
+      return;
+    }
     this.renderAdminPortal();
   },
 
-  handleSidebarSearch(e) {
-    this.sidebarSearch = e.target.value.toLowerCase();
-    this.renderAdminPortal();
+  async fetchPendingReviews() {
+    try {
+      const res = await fetch(`${API_BASE}/api/admin/pending-reviews`, {
+        headers: { 'Authorization': `Bearer ${this.token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        this.pendingReviewsList = data.pending_reviews || [];
+      }
+    } catch (e) {
+      console.error('Failed to fetch pending reviews', e);
+    }
+  },
+
+  openAddMemberModal(type = 'student') {
+    this.switchMemberTab(type);
+    this.openModal('addStudentModal');
   },
 
   renderAdminPortal() {
     const main = document.getElementById('appRoot');
     const stats = this.adminStats || { total_students: 0, pending_reviews: 0, approved_tasks: 0, rejected_tasks: 0 };
 
-    const courseStudentsCount = this.allStudents.filter(s => (s.user_type || 'student') === 'student').length;
-    const internsCount = this.allStudents.filter(s => s.user_type === 'intern').length;
-    const employeesCount = this.allStudents.filter(s => s.user_type === 'employee').length;
+    const courseStudents = this.allStudents.filter(s => (s.user_type || 'student') === 'student');
+    const interns = this.allStudents.filter(s => s.user_type === 'intern');
+    const employees = this.allStudents.filter(s => s.user_type === 'employee');
 
-    // Filter students for sidebar
-    const filteredStudents = this.allStudents.filter(s => {
-      const matchesSearch = !this.sidebarSearch
-        || s.full_name.toLowerCase().includes(this.sidebarSearch)
-        || s.username.toLowerCase().includes(this.sidebarSearch);
-
-      if (!matchesSearch) return false;
-
-      const userType = s.user_type || 'student';
-      if (this.adminCategoryFilter !== 'all' && userType !== this.adminCategoryFilter) {
-        return false;
-      }
-
-      if (this.sidebarFilter === 'pending') {
-        return s.pending_count > 0;
-      } else if (this.sidebarFilter === 'completed') {
-        return s.pending_count === 0;
-      }
-      return true;
-    });
-
+    const courseStudentsCount = courseStudents.length;
+    const internsCount = interns.length;
+    const employeesCount = employees.length;
     const pendingTotal = this.allStudents.filter(s => s.pending_count > 0).length;
 
+    // Fees & Payroll totals
+    const courseTotalFees = courseStudents.reduce((sum, s) => sum + Number(s.total_fees || 0), 0);
+    const coursePaidFees = courseStudents.reduce((sum, s) => sum + Number(s.fees_paid || 0), 0);
+    const coursePendingFees = Math.max(0, courseTotalFees - coursePaidFees);
+
+    const internTotalFees = interns.reduce((sum, s) => sum + Number(s.total_fees || 0), 0);
+    const internPaidFees = interns.reduce((sum, s) => sum + Number(s.fees_paid || 0), 0);
+    const internPendingFees = Math.max(0, internTotalFees - internPaidFees);
+
+    const staffTotalSalary = employees.reduce((sum, s) => sum + Number(s.salary_amount || 0), 0);
+    const staffPaidSalary = employees.filter(s => s.salary_status === 'PAID').reduce((sum, s) => sum + Number(s.salary_amount || 0), 0);
+    const staffPendingSalary = employees.filter(s => s.salary_status !== 'PAID').reduce((sum, s) => sum + Number(s.salary_amount || 0), 0);
+
     main.innerHTML = `
-      <!-- Top Header & Enroll Button -->
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px; flex-wrap:wrap; gap:12px;">
+      <!-- Top Branding Strip -->
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:18px; flex-wrap:wrap; gap:12px;">
         <div style="display:flex; align-items:center; gap:12px;">
           <img src="logo.png" alt="GrowthNest Logo" style="height:44px; width:auto; border-radius:6px;">
           <div>
-            <h2 style="font-size:22px; font-weight:800; color:var(--dark-navy);">GrowthNest Admin & Mentor Hub</h2>
-            <p style="font-size:13px; color:var(--text-muted);">Master-Detail Student Task Evaluation, Fees & Staff Payroll</p>
+            <h2 style="font-size:22px; font-weight:800; color:var(--dark-navy);">GrowthNest Admin & Management Console</h2>
+            <p style="font-size:13px; color:var(--text-muted);">Dedicated Management Blocks for Students, Interns, Staff & Finance</p>
           </div>
         </div>
-        <button class="btn btn-primary" onclick="app.openModal('addStudentModal')">
-          ➕ Add Member (Student / Intern / Staff)
+      </div>
+
+      <!-- MASTER BLOCK NAVIGATION (Separate Blocks) -->
+      <nav class="admin-blocks-nav">
+        <button class="admin-block-btn ${this.adminActiveBlock === 'students' ? 'active' : ''}" onclick="app.setAdminActiveBlock('students')">
+          <span class="block-btn-icon">🎓</span>
+          <span class="block-btn-text">Course Students</span>
+          <span class="block-btn-count">${courseStudentsCount}</span>
+        </button>
+        <button class="admin-block-btn ${this.adminActiveBlock === 'interns' ? 'active' : ''}" onclick="app.setAdminActiveBlock('interns')">
+          <span class="block-btn-icon">💼</span>
+          <span class="block-btn-text">Interns</span>
+          <span class="block-btn-count">${internsCount}</span>
+        </button>
+        <button class="admin-block-btn ${this.adminActiveBlock === 'employees' ? 'active' : ''}" onclick="app.setAdminActiveBlock('employees')">
+          <span class="block-btn-icon">👔</span>
+          <span class="block-btn-text">Staff & Mentors</span>
+          <span class="block-btn-count">${employeesCount}</span>
+        </button>
+        <button class="admin-block-btn ${this.adminActiveBlock === 'reviews' ? 'active' : ''}" onclick="app.setAdminActiveBlock('reviews')">
+          <span class="block-btn-icon">🔔</span>
+          <span class="block-btn-text">Task Reviews</span>
+          <span class="block-btn-count notif-count">${pendingTotal}</span>
+        </button>
+        <button class="admin-block-btn ${this.adminActiveBlock === 'finance' ? 'active' : ''}" onclick="app.setAdminActiveBlock('finance')">
+          <span class="block-btn-icon">💰</span>
+          <span class="block-btn-text">Fees & Payroll</span>
+        </button>
+      </nav>
+
+      <!-- ACTIVE BLOCK CONTENT CONTAINER -->
+      <div id="adminBlockContainer">
+        ${(() => {
+          if (this.adminActiveBlock === 'interns') {
+            return this.renderInternsBlock(interns, internPaidFees, internPendingFees, stats);
+          } else if (this.adminActiveBlock === 'employees') {
+            return this.renderEmployeesBlock(employees, staffTotalSalary, staffPaidSalary, staffPendingSalary);
+          } else if (this.adminActiveBlock === 'reviews') {
+            return this.renderReviewsBlock(pendingTotal);
+          } else if (this.adminActiveBlock === 'finance') {
+            return this.renderFinanceBlock(courseTotalFees, coursePaidFees, coursePendingFees, internTotalFees, internPaidFees, internPendingFees, staffTotalSalary, staffPaidSalary, staffPendingSalary);
+          } else {
+            return this.renderStudentsBlock(courseStudents, coursePaidFees, coursePendingFees, stats);
+          }
+        })()}
+      </div>
+    `;
+  },
+
+  // --------------------------------------------------------------------------
+  // BLOCK 1: COURSE STUDENTS BLOCK
+  // --------------------------------------------------------------------------
+  renderStudentsBlock(students, feesPaid, feesPending, stats) {
+    const filtered = students.filter(s => {
+      const matchSearch = !this.sidebarSearch
+        || s.full_name.toLowerCase().includes(this.sidebarSearch)
+        || s.username.toLowerCase().includes(this.sidebarSearch);
+      if (!matchSearch) return false;
+      if (this.sidebarFilter === 'pending') return s.pending_count > 0;
+      if (this.sidebarFilter === 'completed') return s.pending_count === 0;
+      return true;
+    });
+
+    const pendingCount = students.filter(s => s.pending_count > 0).length;
+
+    return `
+      <!-- Block Header Card -->
+      <div class="block-header-card">
+        <div class="block-header-title">
+          <h2><span>🎓</span> Course Students Training Block</h2>
+          <p>Curriculum progression, 23 hands-on tasks, code submissions & tuition fee records</p>
+        </div>
+        <button class="btn btn-primary" onclick="app.openAddMemberModal('student')">
+          ➕ Enroll Course Student
         </button>
       </div>
 
-      <!-- Real KPI Stats Bar -->
+      <!-- Block KPI Bar -->
       <div class="admin-stats-strip">
         <div class="stat-metric-card">
           <div class="stat-metric-icon" style="background:var(--emerald-light); color:var(--emerald-deep);">🎓</div>
           <div>
-            <div class="stat-metric-val">${stats.total_course_students ?? courseStudentsCount}</div>
-            <div class="stat-metric-lbl">Course Students</div>
+            <div class="stat-metric-val">${students.length}</div>
+            <div class="stat-metric-lbl">Total Course Students</div>
           </div>
         </div>
-
-        <div class="stat-metric-card">
-          <div class="stat-metric-icon" style="background:var(--gold-light); color:var(--gold-deep);">💼</div>
-          <div>
-            <div class="stat-metric-val">${stats.total_interns ?? internsCount}</div>
-            <div class="stat-metric-lbl">Interns Enrolled</div>
-          </div>
-        </div>
-
-        <div class="stat-metric-card">
-          <div class="stat-metric-icon" style="background:#eff6ff; color:#1d4ed8;">👔</div>
-          <div>
-            <div class="stat-metric-val">${stats.total_employees ?? employeesCount}</div>
-            <div class="stat-metric-lbl">Staff / Employees</div>
-          </div>
-        </div>
-
-        <div class="stat-metric-card clickable" onclick="app.quickOpenNextPending()" title="Click to view and review pending submissions" style="border-color:${stats.pending_reviews > 0 ? 'var(--gold)' : 'var(--border)'};">
+        <div class="stat-metric-card clickable" onclick="app.setSidebarFilter('pending')" style="border-color:${pendingCount > 0 ? 'var(--gold)' : 'var(--border)'};">
           <div class="stat-metric-icon" style="background:var(--gold-light); color:var(--gold-deep);">🔔</div>
           <div>
-            <div class="stat-metric-val" style="color:${stats.pending_reviews > 0 ? 'var(--gold-deep)' : 'var(--text-main)'};">
-              ${stats.pending_reviews}
-            </div>
-            <div class="stat-metric-lbl">Pending Submissions &rarr;</div>
+            <div class="stat-metric-val" style="color:${pendingCount > 0 ? 'var(--gold-deep)' : 'var(--text-main)'};">${pendingCount}</div>
+            <div class="stat-metric-lbl">Submissions Awaiting Review &rarr;</div>
           </div>
         </div>
-
         <div class="stat-metric-card">
           <div class="stat-metric-icon" style="background:#dcfce7; color:#15803d;">💰</div>
           <div>
-            <div class="stat-metric-val" style="font-size:16px; color:#15803d;">₹${Number(stats.total_fees_paid || 0).toLocaleString()}</div>
-            <div class="stat-metric-lbl">Fees Collected (₹${Number(stats.total_pending_fees || 0).toLocaleString()} Due)</div>
+            <div class="stat-metric-val" style="color:#15803d;">₹${feesPaid.toLocaleString()}</div>
+            <div class="stat-metric-lbl">Tuition Fees Collected</div>
           </div>
         </div>
-
         <div class="stat-metric-card">
-          <div class="stat-metric-icon" style="background:#e0e7ff; color:#4338ca;">💳</div>
+          <div class="stat-metric-icon" style="background:#fee2e2; color:#b91c1c;">⚠️</div>
           <div>
-            <div class="stat-metric-val" style="font-size:16px; color:#4338ca;">₹${Number(stats.total_salary || 0).toLocaleString()}</div>
-            <div class="stat-metric-lbl">Monthly Staff Payroll</div>
+            <div class="stat-metric-val" style="color:#b91c1c;">₹${feesPending.toLocaleString()}</div>
+            <div class="stat-metric-lbl">Fees Balance Due</div>
           </div>
         </div>
       </div>
 
-      <!-- Mobile View Switcher (Only visible on screens <= 860px) -->
+      <!-- Mobile View Switcher -->
       <div class="admin-mobile-nav-bar">
         <button class="mobile-nav-btn ${this.adminMobileTab === 'students' ? 'active' : ''}" onclick="app.setAdminMobileTab('students')">
-          👥 Members (${this.allStudents.length})
+          👥 Students (${students.length})
         </button>
         <button class="mobile-nav-btn ${this.adminMobileTab === 'workspace' ? 'active' : ''}" onclick="app.setAdminMobileTab('workspace')">
-          📁 ${this.selectedStudentPortfolio && this.selectedStudentPortfolio.student ? this.escape(this.selectedStudentPortfolio.student.full_name) : 'Member Workspace'}
-          ${(this.selectedStudentPortfolio && this.selectedStudentPortfolio.pending_count > 0) ? `<span class="notif-badge-pill" style="margin-left:4px;">🔔</span>` : ''}
+          📁 ${this.selectedStudentPortfolio && this.selectedStudentPortfolio.student ? this.escape(this.selectedStudentPortfolio.student.full_name) : 'Student Workspace'}
         </button>
       </div>
 
-      <!-- 2-Column Responsive Workspace: Side Dashboard + Individual Member View -->
       <div class="admin-workspace-grid">
-        <!-- LEFT COLUMN: Side Dashboard (Members List with Notifications) -->
+        <!-- LEFT: Students Directory -->
         <aside class="admin-sidebar-panel ${this.adminMobileTab === 'workspace' ? 'mobile-tab-hidden' : ''}">
           <div class="sidebar-header-row">
-            <h3>👥 Directory</h3>
-            <span style="font-size:12px; font-weight:700; color:var(--text-muted);">${this.allStudents.length} Total</span>
+            <h3>🎓 Students Directory</h3>
+            <span style="font-size:12px; font-weight:700; color:var(--text-muted);">${students.length} Enrolled</span>
           </div>
 
-          <input type="text" class="sidebar-search-box" placeholder="🔍 Search name or username..." value="${this.escape(this.sidebarSearch)}" oninput="app.handleSidebarSearch(event)">
-
-          <!-- Member Category Filters: All, Students, Interns, Employees -->
-          <div class="sidebar-filter-tabs" style="margin-bottom:8px;">
-            <button class="filter-tab-pill ${this.adminCategoryFilter === 'all' ? 'active' : ''}" onclick="app.setAdminCategoryFilter('all')">
-              All (${this.allStudents.length})
-            </button>
-            <button class="filter-tab-pill ${this.adminCategoryFilter === 'student' ? 'active' : ''}" onclick="app.setAdminCategoryFilter('student')">
-              🎓 Students (${courseStudentsCount})
-            </button>
-            <button class="filter-tab-pill ${this.adminCategoryFilter === 'intern' ? 'active' : ''}" onclick="app.setAdminCategoryFilter('intern')">
-              💼 Interns (${internsCount})
-            </button>
-            <button class="filter-tab-pill ${this.adminCategoryFilter === 'employee' ? 'active' : ''}" onclick="app.setAdminCategoryFilter('employee')">
-              👔 Staff (${employeesCount})
-            </button>
-          </div>
+          <input type="text" class="sidebar-search-box" placeholder="🔍 Search student name..." value="${this.escape(this.sidebarSearch)}" oninput="app.handleSidebarSearch(event)">
 
           <div class="sidebar-filter-tabs">
             <button class="filter-tab-pill ${this.sidebarFilter === 'all' ? 'active' : ''}" onclick="app.setSidebarFilter('all')">
-              All Status
+              All (${students.length})
             </button>
-            <button class="filter-tab-pill ${this.sidebarFilter === 'pending' ? 'active' : ''}" onclick="app.setSidebarFilter('pending')" style="${pendingTotal > 0 ? 'color:var(--gold-deep); font-weight:800;' : ''}">
-              🔔 Needs Review (${pendingTotal})
+            <button class="filter-tab-pill ${this.sidebarFilter === 'pending' ? 'active' : ''}" onclick="app.setSidebarFilter('pending')" style="${pendingCount > 0 ? 'color:var(--gold-deep); font-weight:800;' : ''}">
+              🔔 Needs Review (${pendingCount})
             </button>
             <button class="filter-tab-pill ${this.sidebarFilter === 'completed' ? 'active' : ''}" onclick="app.setSidebarFilter('completed')">
               ✓ Up to date
             </button>
           </div>
 
-          <!-- Members List -->
           <div class="admin-students-list">
-            ${filteredStudents.length === 0 ? `
+            ${filtered.length === 0 ? `
               <div style="text-align:center; padding:24px; color:var(--text-muted); font-size:13px;">
-                No members match your filter.
+                No students match your search.
               </div>
-            ` : filteredStudents.map(s => {
+            ` : filtered.map(s => {
               const isSelected = s.id === this.selectedStudentId;
               const hasPending = s.pending_count > 0;
-              const isEmp = s.user_type === 'employee';
-              const isInt = s.user_type === 'intern';
-
               return `
                 <div class="student-card-item ${isSelected ? 'selected' : ''}" onclick="app.selectStudentAndReview(${s.id})">
                   <div class="student-card-header">
@@ -1287,59 +1412,594 @@ const app = {
                       ${s.avatar_url ? `
                         <img src="${s.avatar_url}" alt="" class="student-avatar-img" style="width:38px; height:38px;">
                       ` : `
-                        <div class="student-avatar" style="${isEmp ? 'background:#eff6ff; color:#1e40af; border-color:#bfdbfe;' : ''}">
+                        <div class="student-avatar">
                           ${this.getInitials(s.full_name)}
                         </div>
                       `}
                       <div>
-                        <div class="student-name-text" style="display:flex; align-items:center; gap:6px;">
-                          <span>${this.escape(s.full_name)}</span>
-                          ${isInt ? '<span class="badge-role badge-intern" style="font-size:9.5px; padding:1px 5px;">Intern</span>' : ''}
-                          ${isEmp ? '<span class="badge-role badge-employee" style="font-size:9.5px; padding:1px 5px;">Staff</span>' : ''}
-                        </div>
+                        <div class="student-name-text">${this.escape(s.full_name)}</div>
                         <div class="student-username-text">@${this.escape(s.username)}</div>
                       </div>
                     </div>
                     ${hasPending ? `
-                      <span class="student-notif-pill" onclick="event.stopPropagation(); app.selectStudentAndReview(${s.id})" title="Click to jump directly to this review!">
-                        <span class="pulse-dot"></span>
-                        🔔 ${s.pending_count} New
+                      <span class="student-notif-pill" onclick="event.stopPropagation(); app.selectStudentAndReview(${s.id})" title="Click to jump to review!">
+                        <span class="pulse-dot"></span> 🔔 ${s.pending_count} New
                       </span>
                     ` : ''}
                   </div>
-
-                  ${isEmp ? `
-                    <div class="student-meta-strip">
-                      <span>💼 ${this.escape(s.designation || 'Staff')}</span>
-                      <span style="font-weight:700; color:#1d4ed8;">${this.escape(s.department || 'GrowthNest')}</span>
-                    </div>
-                    <div style="font-size:11px; color:#475569; display:flex; justify-content:space-between; align-items:center;">
-                      <span>💰 ₹${Number(s.salary_amount || 0).toLocaleString()} /mo</span>
-                      <span class="status-pill status-${(s.salary_status || 'PENDING').toLowerCase()}" style="font-size:9.5px; padding:1px 6px;">Salary: ${s.salary_status || 'PENDING'}</span>
-                    </div>
-                  ` : `
-                    <div class="student-meta-strip">
-                      <span>🗓️ Day ${s.days_enrolled} (${s.joining_date})</span>
-                      <span style="font-weight:700; color:var(--emerald-dark);">${s.completed_count}/23 Tasks</span>
-                    </div>
-                    <div style="font-size:11px; color:#475569; display:flex; justify-content:space-between; align-items:center;">
-                      <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:60%;">📌 ${this.escape(s.current_task_title || 'Task 1')}</span>
-                      <span class="status-pill status-${(s.fees_status || 'PENDING').toLowerCase()}" style="font-size:9.5px; padding:1px 6px;">Fees: ${s.fees_status || 'PENDING'}</span>
-                    </div>
-                  `}
+                  <div class="student-meta-strip">
+                    <span>🗓️ Day ${s.days_enrolled} (${s.joining_date})</span>
+                    <span style="font-weight:700; color:var(--emerald-dark);">${s.completed_count}/23 Tasks</span>
+                  </div>
+                  <div style="font-size:11px; color:#475569; display:flex; justify-content:space-between; align-items:center;">
+                    <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:60%;">📌 ${this.escape(s.current_task_title || 'Task 1')}</span>
+                    <span class="status-pill status-${(s.fees_status || 'PENDING').toLowerCase()}" style="font-size:9.5px; padding:1px 6px;">Fees: ${s.fees_status || 'PENDING'}</span>
+                  </div>
                 </div>
               `;
             }).join('')}
           </div>
         </aside>
 
-        <!-- RIGHT COLUMN: Dedicated Workspace (Per-Member View) -->
+        <!-- RIGHT: Dedicated Student Workspace -->
         <section id="studentWorkspace" class="admin-detail-panel ${this.adminMobileTab === 'students' ? 'mobile-tab-hidden' : ''}">
           <button class="mobile-back-to-list-btn" onclick="app.setAdminMobileTab('students')">
-            &larr; Back to Directory
+            &larr; Back to Students Directory
           </button>
           ${this.renderStudentWorkspace()}
         </section>
+      </div>
+    `;
+  },
+
+  // --------------------------------------------------------------------------
+  // BLOCK 2: INTERNS MANAGEMENT BLOCK
+  // --------------------------------------------------------------------------
+  renderInternsBlock(interns, feesPaid, feesPending, stats) {
+    const filtered = interns.filter(s => {
+      const matchSearch = !this.sidebarSearch
+        || s.full_name.toLowerCase().includes(this.sidebarSearch)
+        || s.username.toLowerCase().includes(this.sidebarSearch);
+      if (!matchSearch) return false;
+      if (this.sidebarFilter === 'pending') return s.pending_count > 0;
+      if (this.sidebarFilter === 'completed') return s.pending_count === 0;
+      return true;
+    });
+
+    const pendingCount = interns.filter(s => s.pending_count > 0).length;
+
+    return `
+      <!-- Block Header Card -->
+      <div class="block-header-card">
+        <div class="block-header-title">
+          <h2><span>💼</span> Industry Interns Management Block</h2>
+          <p>Internship batches, real-time tasks, evaluation feedback & stipend/fees tracking</p>
+        </div>
+        <button class="btn btn-primary" style="background:#f59e0b; border-color:#d97706;" onclick="app.openAddMemberModal('intern')">
+          ➕ Enroll New Intern
+        </button>
+      </div>
+
+      <!-- Block KPI Bar -->
+      <div class="admin-stats-strip">
+        <div class="stat-metric-card">
+          <div class="stat-metric-icon" style="background:#fef3c7; color:#b45309;">💼</div>
+          <div>
+            <div class="stat-metric-val">${interns.length}</div>
+            <div class="stat-metric-lbl">Total Interns Enrolled</div>
+          </div>
+        </div>
+        <div class="stat-metric-card clickable" onclick="app.setSidebarFilter('pending')" style="border-color:${pendingCount > 0 ? 'var(--gold)' : 'var(--border)'};">
+          <div class="stat-metric-icon" style="background:var(--gold-light); color:var(--gold-deep);">🔔</div>
+          <div>
+            <div class="stat-metric-val" style="color:${pendingCount > 0 ? 'var(--gold-deep)' : 'var(--text-main)'};">${pendingCount}</div>
+            <div class="stat-metric-lbl">Intern Submissions Awaiting Review &rarr;</div>
+          </div>
+        </div>
+        <div class="stat-metric-card">
+          <div class="stat-metric-icon" style="background:#dcfce7; color:#15803d;">💰</div>
+          <div>
+            <div class="stat-metric-val" style="color:#15803d;">₹${feesPaid.toLocaleString()}</div>
+            <div class="stat-metric-lbl">Fees / Stipend Collected</div>
+          </div>
+        </div>
+        <div class="stat-metric-card">
+          <div class="stat-metric-icon" style="background:#fee2e2; color:#b91c1c;">⚠️</div>
+          <div>
+            <div class="stat-metric-val" style="color:#b91c1c;">₹${feesPending.toLocaleString()}</div>
+            <div class="stat-metric-lbl">Balance Pending</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mobile View Switcher -->
+      <div class="admin-mobile-nav-bar">
+        <button class="mobile-nav-btn ${this.adminMobileTab === 'students' ? 'active' : ''}" onclick="app.setAdminMobileTab('students')">
+          👥 Interns (${interns.length})
+        </button>
+        <button class="mobile-nav-btn ${this.adminMobileTab === 'workspace' ? 'active' : ''}" onclick="app.setAdminMobileTab('workspace')">
+          📁 ${this.selectedStudentPortfolio && this.selectedStudentPortfolio.student ? this.escape(this.selectedStudentPortfolio.student.full_name) : 'Intern Workspace'}
+        </button>
+      </div>
+
+      <div class="admin-workspace-grid">
+        <!-- LEFT: Interns Directory -->
+        <aside class="admin-sidebar-panel ${this.adminMobileTab === 'workspace' ? 'mobile-tab-hidden' : ''}">
+          <div class="sidebar-header-row">
+            <h3>💼 Interns Directory</h3>
+            <span style="font-size:12px; font-weight:700; color:var(--text-muted);">${interns.length} Enrolled</span>
+          </div>
+
+          <input type="text" class="sidebar-search-box" placeholder="🔍 Search intern name..." value="${this.escape(this.sidebarSearch)}" oninput="app.handleSidebarSearch(event)">
+
+          <div class="sidebar-filter-tabs">
+            <button class="filter-tab-pill ${this.sidebarFilter === 'all' ? 'active' : ''}" onclick="app.setSidebarFilter('all')">
+              All (${interns.length})
+            </button>
+            <button class="filter-tab-pill ${this.sidebarFilter === 'pending' ? 'active' : ''}" onclick="app.setSidebarFilter('pending')" style="${pendingCount > 0 ? 'color:var(--gold-deep); font-weight:800;' : ''}">
+              🔔 Needs Review (${pendingCount})
+            </button>
+            <button class="filter-tab-pill ${this.sidebarFilter === 'completed' ? 'active' : ''}" onclick="app.setSidebarFilter('completed')">
+              ✓ Up to date
+            </button>
+          </div>
+
+          <div class="admin-students-list">
+            ${filtered.length === 0 ? `
+              <div style="text-align:center; padding:24px; color:var(--text-muted); font-size:13px;">
+                No interns enrolled yet. Click "+ Enroll New Intern" to add.
+              </div>
+            ` : filtered.map(s => {
+              const isSelected = s.id === this.selectedStudentId;
+              const hasPending = s.pending_count > 0;
+              return `
+                <div class="student-card-item ${isSelected ? 'selected' : ''}" onclick="app.selectStudentAndReview(${s.id})">
+                  <div class="student-card-header">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                      ${s.avatar_url ? `
+                        <img src="${s.avatar_url}" alt="" class="student-avatar-img" style="width:38px; height:38px;">
+                      ` : `
+                        <div class="student-avatar" style="background:#fef3c7; color:#b45309; border-color:#fde68a;">
+                          ${this.getInitials(s.full_name)}
+                        </div>
+                      `}
+                      <div>
+                        <div class="student-name-text" style="display:flex; align-items:center; gap:6px;">
+                          <span>${this.escape(s.full_name)}</span>
+                          <span class="badge-role badge-intern" style="font-size:9.5px; padding:1px 5px;">Intern</span>
+                        </div>
+                        <div class="student-username-text">@${this.escape(s.username)}</div>
+                      </div>
+                    </div>
+                    ${hasPending ? `
+                      <span class="student-notif-pill" onclick="event.stopPropagation(); app.selectStudentAndReview(${s.id})" title="Click to jump to review!">
+                        <span class="pulse-dot"></span> 🔔 ${s.pending_count} New
+                      </span>
+                    ` : ''}
+                  </div>
+                  <div class="student-meta-strip">
+                    <span>🗓️ Day ${s.days_enrolled} (${s.joining_date})</span>
+                    <span style="font-weight:700; color:var(--emerald-dark);">${s.completed_count}/23 Tasks</span>
+                  </div>
+                  <div style="font-size:11px; color:#475569; display:flex; justify-content:space-between; align-items:center;">
+                    <span style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:60%;">📌 ${this.escape(s.current_task_title || 'Task 1')}</span>
+                    <span class="status-pill status-${(s.fees_status || 'PENDING').toLowerCase()}" style="font-size:9.5px; padding:1px 6px;">Fees: ${s.fees_status || 'PENDING'}</span>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </aside>
+
+        <!-- RIGHT: Dedicated Intern Workspace -->
+        <section id="studentWorkspace" class="admin-detail-panel ${this.adminMobileTab === 'students' ? 'mobile-tab-hidden' : ''}">
+          <button class="mobile-back-to-list-btn" onclick="app.setAdminMobileTab('students')">
+            &larr; Back to Interns Directory
+          </button>
+          ${this.renderStudentWorkspace()}
+        </section>
+      </div>
+    `;
+  },
+
+  // --------------------------------------------------------------------------
+  // BLOCK 3: STAFF & MENTORS BLOCK
+  // --------------------------------------------------------------------------
+  renderEmployeesBlock(employees, totalSalary, paidSalary, pendingSalary) {
+    const filtered = employees.filter(s => {
+      const matchSearch = !this.sidebarSearch
+        || s.full_name.toLowerCase().includes(this.sidebarSearch)
+        || s.username.toLowerCase().includes(this.sidebarSearch);
+      if (!matchSearch) return false;
+      if (this.sidebarFilter === 'pending') return s.salary_status !== 'PAID';
+      if (this.sidebarFilter === 'completed') return s.salary_status === 'PAID';
+      return true;
+    });
+
+    const pendingSalaryCount = employees.filter(s => s.salary_status !== 'PAID').length;
+
+    return `
+      <!-- Block Header Card -->
+      <div class="block-header-card">
+        <div class="block-header-title">
+          <h2><span>👔</span> Staff & Mentors Management Block</h2>
+          <p>GrowthNest Instructors, Technical Mentors & Monthly Salary Disbursements</p>
+        </div>
+        <button class="btn btn-primary" style="background:#2563eb; border-color:#1d4ed8;" onclick="app.openAddMemberModal('employee')">
+          ➕ Register Staff Member
+        </button>
+      </div>
+
+      <!-- Block KPI Bar -->
+      <div class="admin-stats-strip">
+        <div class="stat-metric-card">
+          <div class="stat-metric-icon" style="background:#eff6ff; color:#1d4ed8;">👔</div>
+          <div>
+            <div class="stat-metric-val">${employees.length}</div>
+            <div class="stat-metric-lbl">Total Staff & Mentors</div>
+          </div>
+        </div>
+        <div class="stat-metric-card">
+          <div class="stat-metric-icon" style="background:#e0e7ff; color:#4338ca;">💳</div>
+          <div>
+            <div class="stat-metric-val" style="color:#4338ca;">₹${totalSalary.toLocaleString()}</div>
+            <div class="stat-metric-lbl">Monthly Committed Payroll</div>
+          </div>
+        </div>
+        <div class="stat-metric-card">
+          <div class="stat-metric-icon" style="background:#dcfce7; color:#15803d;">✓</div>
+          <div>
+            <div class="stat-metric-val" style="color:#15803d;">₹${paidSalary.toLocaleString()}</div>
+            <div class="stat-metric-lbl">Salaries Disbursed</div>
+          </div>
+        </div>
+        <div class="stat-metric-card clickable" onclick="app.setSidebarFilter('pending')" style="border-color:${pendingSalaryCount > 0 ? 'var(--gold)' : 'var(--border)'};">
+          <div class="stat-metric-icon" style="background:#fef3c7; color:#b45309;">⏳</div>
+          <div>
+            <div class="stat-metric-val" style="color:#b45309;">₹${pendingSalary.toLocaleString()}</div>
+            <div class="stat-metric-lbl">Pending Disbursals (${pendingSalaryCount})</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mobile View Switcher -->
+      <div class="admin-mobile-nav-bar">
+        <button class="mobile-nav-btn ${this.adminMobileTab === 'students' ? 'active' : ''}" onclick="app.setAdminMobileTab('students')">
+          👥 Staff (${employees.length})
+        </button>
+        <button class="mobile-nav-btn ${this.adminMobileTab === 'workspace' ? 'active' : ''}" onclick="app.setAdminMobileTab('workspace')">
+          📁 ${this.selectedStudentPortfolio && this.selectedStudentPortfolio.student ? this.escape(this.selectedStudentPortfolio.student.full_name) : 'Staff Workspace'}
+        </button>
+      </div>
+
+      <div class="admin-workspace-grid">
+        <!-- LEFT: Staff Directory -->
+        <aside class="admin-sidebar-panel ${this.adminMobileTab === 'workspace' ? 'mobile-tab-hidden' : ''}">
+          <div class="sidebar-header-row">
+            <h3>👔 Staff Directory</h3>
+            <span style="font-size:12px; font-weight:700; color:var(--text-muted);">${employees.length} Staff</span>
+          </div>
+
+          <input type="text" class="sidebar-search-box" placeholder="🔍 Search staff name..." value="${this.escape(this.sidebarSearch)}" oninput="app.handleSidebarSearch(event)">
+
+          <div class="sidebar-filter-tabs">
+            <button class="filter-tab-pill ${this.sidebarFilter === 'all' ? 'active' : ''}" onclick="app.setSidebarFilter('all')">
+              All (${employees.length})
+            </button>
+            <button class="filter-tab-pill ${this.sidebarFilter === 'pending' ? 'active' : ''}" onclick="app.setSidebarFilter('pending')">
+              ⏳ Pending (${pendingSalaryCount})
+            </button>
+            <button class="filter-tab-pill ${this.sidebarFilter === 'completed' ? 'active' : ''}" onclick="app.setSidebarFilter('completed')">
+              ✓ Disbursed
+            </button>
+          </div>
+
+          <div class="admin-students-list">
+            ${filtered.length === 0 ? `
+              <div style="text-align:center; padding:24px; color:var(--text-muted); font-size:13px;">
+                No staff members registered. Click "+ Register Staff Member" to add.
+              </div>
+            ` : filtered.map(s => {
+              const isSelected = s.id === this.selectedStudentId;
+              return `
+                <div class="student-card-item ${isSelected ? 'selected' : ''}" onclick="app.selectStudentAndReview(${s.id})">
+                  <div class="student-card-header">
+                    <div style="display:flex; align-items:center; gap:10px;">
+                      ${s.avatar_url ? `
+                        <img src="${s.avatar_url}" alt="" class="student-avatar-img" style="width:38px; height:38px;">
+                      ` : `
+                        <div class="student-avatar" style="background:#eff6ff; color:#1e40af; border-color:#bfdbfe;">
+                          ${this.getInitials(s.full_name)}
+                        </div>
+                      `}
+                      <div>
+                        <div class="student-name-text" style="display:flex; align-items:center; gap:6px;">
+                          <span>${this.escape(s.full_name)}</span>
+                          <span class="badge-role badge-employee" style="font-size:9.5px; padding:1px 5px;">Staff</span>
+                        </div>
+                        <div class="student-username-text">@${this.escape(s.username)}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="student-meta-strip">
+                    <span>💼 ${this.escape(s.designation || 'Staff')}</span>
+                    <span style="font-weight:700; color:#1d4ed8;">${this.escape(s.department || 'GrowthNest')}</span>
+                  </div>
+                  <div style="font-size:11px; color:#475569; display:flex; justify-content:space-between; align-items:center;">
+                    <span>💰 ₹${Number(s.salary_amount || 0).toLocaleString()} /mo</span>
+                    <span class="status-pill status-${(s.salary_status || 'PENDING').toLowerCase()}" style="font-size:9.5px; padding:1px 6px;">Salary: ${s.salary_status || 'PENDING'}</span>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </aside>
+
+        <!-- RIGHT: Dedicated Staff Workspace -->
+        <section id="studentWorkspace" class="admin-detail-panel ${this.adminMobileTab === 'students' ? 'mobile-tab-hidden' : ''}">
+          <button class="mobile-back-to-list-btn" onclick="app.setAdminMobileTab('students')">
+            &larr; Back to Staff Directory
+          </button>
+          ${this.renderStudentWorkspace()}
+        </section>
+      </div>
+    `;
+  },
+
+  // --------------------------------------------------------------------------
+  // BLOCK 4: TASK REVIEWS QUEUE BLOCK
+  // --------------------------------------------------------------------------
+  renderReviewsBlock(pendingCount) {
+    const list = this.pendingReviewsList || [];
+
+    return `
+      <!-- Block Header Card -->
+      <div class="block-header-card">
+        <div class="block-header-title">
+          <h2><span>🔔</span> Task Evaluations & Code Reviews Block</h2>
+          <p>Live queue of submissions awaiting mentor inspection across students & interns</p>
+        </div>
+        <button class="btn btn-outline" onclick="app.setAdminActiveBlock('reviews')">
+          🔄 Refresh Reviews Queue
+        </button>
+      </div>
+
+      ${list.length === 0 ? `
+        <div class="card" style="text-align:center; padding:54px 20px; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:16px;">
+          <div style="font-size:46px; margin-bottom:12px;">🎉</div>
+          <h3 style="color:#14532d; font-size:20px; font-weight:800;">Review Queue is Clear!</h3>
+          <p style="color:#166534; font-size:14px; margin-top:6px; max-width:540px; margin-left:auto; margin-right:auto; line-height:1.6;">
+            All submitted tasks have been inspected and evaluated. As soon as any course student or intern submits an assignment, it will immediately appear in this queue.
+          </p>
+        </div>
+      ` : `
+        <div style="display:flex; flex-direction:column; gap:20px;">
+          ${list.map(sub => {
+            const scan = this.inspectCode(sub.code_html || sub.sample_code_text);
+            const isIntern = sub.user_type === 'intern';
+            return `
+              <div class="review-hero-card review-pulse-focus" style="margin-bottom:0;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
+                  <div>
+                    <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px;">
+                      <span class="badge-role ${isIntern ? 'badge-intern' : 'badge-student'}">
+                        ${isIntern ? '💼 Intern' : '🎓 Course Student'}
+                      </span>
+                      <strong style="color:var(--dark-navy); font-size:14.5px;">${this.escape(sub.student_name)} (@${this.escape(sub.student_username)})</strong>
+                      <span>&bull;</span>
+                      <span class="step-badge step-badge-${sub.task_module.toLowerCase()}">${sub.task_module} Module</span>
+                    </div>
+                    <h3 style="font-size:18px; font-weight:800; color:var(--dark-navy);">
+                      Task ${sub.sequence_order}: ${this.escape(sub.task_title)}
+                    </h3>
+                  </div>
+                  <div style="font-size:12px; color:var(--text-muted);">
+                    Submitted: <strong>${new Date(sub.submitted_at).toLocaleString()}</strong>
+                  </div>
+                </div>
+
+                ${sub.status === 'CHANGES_REQUESTED' ? `
+                  <div style="background:#fffbeb; border:1px solid #fde68a; color:#92400e; padding:10px 14px; border-radius:6px; font-size:12.5px; margin-bottom:14px;">
+                    ⚠️ <strong>Current Status: In Revisions.</strong> Mentor previous feedback: <em>"${this.escape(sub.admin_feedback)}"</em>.
+                  </div>
+                ` : ''}
+
+                ${sub.student_notes ? `
+                  <div style="background:#f8fafc; border-left:3px solid var(--emerald); padding:10px 14px; font-size:13px; margin-bottom:14px; border-radius:4px; color:#334155;">
+                    <strong>Student Note:</strong> "${this.escape(sub.student_notes)}"
+                  </div>
+                ` : ''}
+
+                <!-- Automated Code Inspector -->
+                <div class="code-inspector-banner">
+                  <div class="code-inspector-title">
+                    <span>🤖</span>
+                    <span>Automated Code Inspector:</span>
+                  </div>
+                  <div class="code-inspector-msg ${scan.hasIssue ? 'has-issue' : 'looks-good'}">
+                    ${scan.hasIssue ? '⚠️ ' + scan.message : '✓ ' + scan.message}
+                  </div>
+                </div>
+
+                <!-- Source Code Box with Copy -->
+                <div style="margin-bottom:16px;">
+                  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+                    <label style="font-size:13px; font-weight:700; color:var(--dark-navy);">Submitted Source Code:</label>
+                    <button class="btn btn-outline btn-sm" onclick="app.copyCodeToClipboard('queueCode_${sub.id}')">📋 Copy Code</button>
+                  </div>
+                  <textarea id="queueCode_${sub.id}" class="code-box" readonly style="height:170px;">${this.escape(sub.code_html || sub.sample_code_text || 'No code submitted')}</textarea>
+                </div>
+
+                <!-- Screenshot with Click to Zoom -->
+                ${sub.output_url ? `
+                  <div style="margin-bottom:16px;">
+                    <label style="font-size:13px; font-weight:700; display:block; margin-bottom:6px; color:var(--dark-navy);">
+                      Output Screenshot:
+                    </label>
+                    <div style="cursor:pointer; display:inline-block;" onclick="app.previewImage('${sub.output_url}')">
+                      <img src="${sub.output_url}" alt="Output Screenshot" style="max-width:100%; max-height:220px; border-radius:8px; border:1px solid var(--border); box-shadow:var(--shadow-sm);">
+                      <div style="font-size:11px; color:var(--emerald-dark); margin-top:3px; font-weight:700;">🔍 Click image to enlarge</div>
+                    </div>
+                  </div>
+                ` : ''}
+
+                <!-- Mentor Feedback with Problem Chips -->
+                <div style="margin-bottom:18px; border-top:1px solid var(--gold-border); padding-top:16px;">
+                  <label style="font-size:13px; font-weight:700; display:block; margin-bottom:6px; color:var(--dark-navy);">
+                    Feedback / Problem Note for ${this.escape(sub.student_name)}:
+                  </label>
+                  <input type="text" id="feedback_${sub.id}" class="form-input" placeholder="Click problem tag below or type custom note..." value="">
+
+                  <div style="margin-top:10px;">
+                    <div style="font-size:11.5px; font-weight:800; color:#b91c1c; margin-bottom:5px; text-transform:uppercase; letter-spacing:0.5px;">
+                      <span>⚠️</span> Code Problems (Click to specify exact issue to student):
+                    </div>
+                    <div class="feedback-chips-strip" style="margin-bottom:10px;">
+                      <span class="feedback-chip chip-problem" onclick="app.insertFeedback(${sub.id}, 'Problem in Code: No valid HTML tags found. Please write actual HTML5 code instead of placeholder text.')">❌ Dummy / Invalid Code</span>
+                      <span class="feedback-chip chip-problem" onclick="app.insertFeedback(${sub.id}, 'Problem in Code: Missing <!DOCTYPE html>, <html>, <head>, or <body> root tags.')">❌ Missing HTML Structure</span>
+                      <span class="feedback-chip chip-problem" onclick="app.insertFeedback(${sub.id}, 'Problem in Code: Some HTML tags are unclosed or have syntax errors. Please fix tag nesting.')">❌ Unclosed Tags</span>
+                      <span class="feedback-chip chip-problem" onclick="app.insertFeedback(${sub.id}, 'Problem in Code: Required semantic tags (<header>, <nav>, <main>, <section>, <footer>) are missing.')">❌ Missing Semantics</span>
+                      <span class="feedback-chip chip-problem" onclick="app.insertFeedback(${sub.id}, 'Problem in Code: Task requirements are incomplete. Please review instructions and checklist.')">❌ Incomplete Requirements</span>
+                    </div>
+
+                    <div style="font-size:11.5px; font-weight:800; color:#15803d; margin-bottom:5px; text-transform:uppercase; letter-spacing:0.5px;">
+                      <span>✓</span> Approval Remarks:
+                    </div>
+                    <div class="feedback-chips-strip">
+                      <span class="feedback-chip chip-success" onclick="app.insertFeedback(${sub.id}, '✓ Excellent clean HTML5 semantic structure! All requirements satisfied.')">✓ Clean Semantics</span>
+                      <span class="feedback-chip chip-success" onclick="app.insertFeedback(${sub.id}, '✓ Well formatted code with proper nesting and structure. Approved!')">✓ Well Formatted</span>
+                      <span class="feedback-chip chip-success" onclick="app.insertFeedback(${sub.id}, '✓ Great work! All requirements verified and approved by GrowthNest Mentor.')">✓ Fully Approved</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div style="display:flex; justify-content:flex-end; gap:12px; flex-wrap:wrap;">
+                  <button class="btn btn-danger" onclick="app.adminDecide(${sub.id}, 'REJECT').then(() => app.setAdminActiveBlock('reviews'))">
+                    ✕ Request Changes
+                  </button>
+                  <button class="btn btn-success" onclick="app.adminDecide(${sub.id}, 'APPROVE').then(() => app.setAdminActiveBlock('reviews'))">
+                    ✓ Approve & Unlock Next Task
+                  </button>
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `}
+    `;
+  },
+
+  // --------------------------------------------------------------------------
+  // BLOCK 5: FINANCIAL LEDGER & PAYROLL BLOCK
+  // --------------------------------------------------------------------------
+  renderFinanceBlock(cTotal, cPaid, cPending, iTotal, iPaid, iPending, sSalary, sPaid, sPending) {
+    const netOperating = (cPaid + iPaid) - sPaid;
+
+    return `
+      <!-- Block Header Card -->
+      <div class="block-header-card">
+        <div class="block-header-title">
+          <h2><span>💰</span> Financial Ledger & Operations Block</h2>
+          <p>Consolidated summary of Course Fees Inflow, Intern Payments & Staff Salary Disbursements</p>
+        </div>
+      </div>
+
+      <!-- Financial KPI Ledger Strip -->
+      <div class="admin-stats-strip">
+        <div class="stat-metric-card">
+          <div class="stat-metric-icon" style="background:#ecfdf5; color:#059669;">🎓</div>
+          <div>
+            <div class="stat-metric-val" style="color:#059669;">₹${cPaid.toLocaleString()}</div>
+            <div class="stat-metric-lbl">Course Fees Collected (₹${cPending.toLocaleString()} Due)</div>
+          </div>
+        </div>
+
+        <div class="stat-metric-card">
+          <div class="stat-metric-icon" style="background:#fef3c7; color:#b45309;">💼</div>
+          <div>
+            <div class="stat-metric-val" style="color:#b45309;">₹${iPaid.toLocaleString()}</div>
+            <div class="stat-metric-lbl">Intern Fees Collected (₹${iPending.toLocaleString()} Due)</div>
+          </div>
+        </div>
+
+        <div class="stat-metric-card">
+          <div class="stat-metric-icon" style="background:#eff6ff; color:#2563eb;">👔</div>
+          <div>
+            <div class="stat-metric-val" style="color:#2563eb;">₹${sSalary.toLocaleString()}</div>
+            <div class="stat-metric-lbl">Monthly Staff Payroll (₹${sPaid.toLocaleString()} Paid)</div>
+          </div>
+        </div>
+
+        <div class="stat-metric-card">
+          <div class="stat-metric-icon" style="background:${netOperating >= 0 ? '#dcfce7' : '#fee2e2'}; color:${netOperating >= 0 ? '#15803d' : '#b91c1c'};">📊</div>
+          <div>
+            <div class="stat-metric-val" style="color:${netOperating >= 0 ? '#15803d' : '#b91c1c'};">₹${netOperating.toLocaleString()}</div>
+            <div class="stat-metric-lbl">Net Operating Flow (Inflow - Payroll)</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Comprehensive Financial Ledger Table -->
+      <div class="card" style="margin-top:20px;">
+        <h3 style="font-size:16px; font-weight:800; color:var(--dark-navy); margin-bottom:14px;">
+          📋 Member Financial Accounts & Payout Ledger (${this.allStudents.length} Records)
+        </h3>
+
+        <div class="table-wrapper">
+          <table class="clean-table">
+            <thead>
+              <tr>
+                <th>Member Name & Login</th>
+                <th>Role Category</th>
+                <th>Track / Designation</th>
+                <th>Total Fee / Salary</th>
+                <th>Paid Amount</th>
+                <th>Balance Due</th>
+                <th>Status</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${this.allStudents.map(s => {
+                const isEmp = s.user_type === 'employee';
+                const isInt = s.user_type === 'intern';
+                const roleBadge = isEmp ? '<span class="badge-role badge-employee">👔 Staff</span>' : (isInt ? '<span class="badge-role badge-intern">💼 Intern</span>' : '<span class="badge-role badge-student">🎓 Student</span>');
+
+                if (isEmp) {
+                  return `
+                    <tr>
+                      <td><strong>${this.escape(s.full_name)}</strong><br><span style="font-size:11.5px; color:#64748b;">@${this.escape(s.username)}</span></td>
+                      <td>${roleBadge}</td>
+                      <td>${this.escape(s.designation || 'Staff')} (${this.escape(s.department || 'Training')})</td>
+                      <td><strong>₹${Number(s.salary_amount || 0).toLocaleString()} /mo</strong></td>
+                      <td style="color:#15803d; font-weight:700;">${s.salary_status === 'PAID' ? '₹' + Number(s.salary_amount || 0).toLocaleString() : '₹0'}</td>
+                      <td style="color:#b45309; font-weight:700;">${s.salary_status === 'PAID' ? '₹0' : '₹' + Number(s.salary_amount || 0).toLocaleString()}</td>
+                      <td><span class="status-pill status-${(s.salary_status || 'PENDING').toLowerCase()}">${s.salary_status || 'PENDING'}</span></td>
+                      <td>
+                        <button class="btn btn-outline btn-sm" onclick="app.openUpdateSalaryModal(${s.id})">✏️ Edit Salary</button>
+                      </td>
+                    </tr>
+                  `;
+                }
+
+                return `
+                  <tr>
+                    <td><strong>${this.escape(s.full_name)}</strong><br><span style="font-size:11.5px; color:#64748b;">@${this.escape(s.username)}</span></td>
+                    <td>${roleBadge}</td>
+                    <td>${this.escape(s.course_track || 'Web Development')}</td>
+                    <td><strong>₹${Number(s.total_fees || 0).toLocaleString()}</strong></td>
+                    <td style="color:#15803d; font-weight:700;">₹${Number(s.fees_paid || 0).toLocaleString()}</td>
+                    <td style="color:${s.pending_fees > 0 ? '#b91c1c' : '#15803d'}; font-weight:700;">₹${Number(s.pending_fees || 0).toLocaleString()}</td>
+                    <td><span class="status-pill status-${(s.fees_status || 'PENDING').toLowerCase()}">${s.fees_status || 'PENDING'}</span></td>
+                    <td>
+                      <button class="btn btn-outline btn-sm" onclick="app.openUpdateFeesModal(${s.id})">✏️ Edit Fees</button>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
       </div>
     `;
   },

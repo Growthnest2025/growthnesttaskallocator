@@ -354,9 +354,9 @@ body {
 /* Portal Choice Cards (Student vs Admin) */
 .portal-choices-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 22px;
-  max-width: 880px;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 20px;
+  max-width: 1160px;
   margin: 0 auto 36px auto;
 }
 
@@ -370,7 +370,7 @@ body {
   background: white;
   border: 2px solid var(--border);
   border-radius: 18px;
-  padding: 32px 24px;
+  padding: 30px 22px;
   text-align: center;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -391,24 +391,42 @@ body {
   border-color: var(--emerald);
 }
 
+.portal-choice-card.intern-theme:hover {
+  border-color: #f59e0b;
+}
+
+.portal-choice-card.employee-theme:hover {
+  border-color: #3b82f6;
+}
+
 .portal-choice-card.admin-theme:hover {
   border-color: var(--gold);
 }
 
 .portal-card-icon {
-  width: 68px;
-  height: 68px;
-  border-radius: 18px;
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 32px;
-  margin: 0 auto 16px auto;
+  font-size: 30px;
+  margin: 0 auto 14px auto;
 }
 
 .student-bg {
   background: var(--emerald-light);
   color: var(--emerald-deep);
+}
+
+.intern-bg {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.employee-bg {
+  background: #eff6ff;
+  color: #1d4ed8;
 }
 
 .admin-bg {
@@ -2281,5 +2299,105 @@ footer strong {
   gap: 8px;
   margin-top: 6px;
 }
+
+/* ==========================================================================
+   Admin Master Blocks Navigation (Separate Blocks for Students, Interns, Staff, Reviews, Finance)
+   ========================================================================== */
+.admin-blocks-nav {
+  display: flex;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 6px;
+  gap: 6px;
+  margin-bottom: 22px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.04);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.admin-block-btn {
+  flex: 1;
+  min-width: 140px;
+  border: none;
+  background: transparent;
+  padding: 11px 16px;
+  border-radius: 12px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.admin-block-btn:hover {
+  background: #f1f5f9;
+  color: var(--dark-navy);
+}
+
+.admin-block-btn.active {
+  background: var(--dark-navy);
+  color: #ffffff;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.22);
+}
+
+.admin-block-btn .block-btn-count {
+  background: #e2e8f0;
+  color: #334155;
+  font-size: 11px;
+  font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 10px;
+}
+
+.admin-block-btn.active .block-btn-count {
+  background: rgba(255, 255, 255, 0.22);
+  color: #ffffff;
+}
+
+.admin-block-btn .block-btn-count.notif-count {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.admin-block-btn.active .block-btn-count.notif-count {
+  background: #ef4444;
+  color: #ffffff;
+}
+
+.block-header-card {
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 20px;
+  margin-bottom: 18px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.block-header-title h2 {
+  font-size: 19px;
+  font-weight: 800;
+  color: var(--dark-navy);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.block-header-title p {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
 
 
